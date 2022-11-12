@@ -3,8 +3,9 @@
 #include <ctype.h>
 #include <stdbool.h>
 
-#include "Op.h"
-#include "stack.h"
+#include "operation.h"
+#include "stack_size_t.h"
+#include "stack_tuple.h"
 
 char *read_entire_file(char *filename)
 {
@@ -118,10 +119,45 @@ void parse_file(struct OperationArray *operations, char *filename)
     free(file_text);
 }
 
+void reverse_expression_order(struct OperationArray *operations)
+{
+    struct OperationArray new_ops;
+    OperationArray_init(&new_ops);
+
+    struct Stack_tuple operation_stack;
+    Stack_tuple_init(&operation_stack);
+
+    int values_available = 0;
+    for (int i = 0; i < operations->size; i++)
+    {
+        struct Tuple t = {i, values_available + operations->start[i].nr_inputs};
+        Stack_tuple_push(&operation_stack, t);
+
+        struct Tuple current_op = t;
+        while (values_available >= current_op.required_size)
+        {
+            struct Operation op = operations->start[current_op.index];
+            OperationArray_add(&new_ops, op);
+            values_available += op.nr_outputs - op.nr_inputs;
+            Stack_tuple_pop(&operation_stack);
+            if (operation_stack.size == 0)
+                break;
+            current_op = Stack_tuple_peek(&operation_stack);
+        }
+    }
+    OperationArray_clear(operations);
+    for (int i = 0; i < new_ops.size; i++)
+    {
+        OperationArray_add(operations, new_ops.start[i]);
+    }
+    OperationArray_free(&new_ops);
+}
+
 void simulate_program(struct OperationArray *operations)
 {
-    struct Stack value_stack;
-    Stack_init(&value_stack);
+    struct Stack_size_t value_stack;
+    Stack_size_t_init(&value_stack);
+
     for (int i = 0; i < operations->size; i++)
     {
         _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
@@ -130,7 +166,7 @@ void simulate_program(struct OperationArray *operations)
         switch (op.type)
         {
         case PRINT:
-            a = Stack_pop(&value_stack);
+            a = Stack_size_t_pop(&value_stack);
             printf("%d\n", a);
             break;
         case PLUS:
@@ -140,17 +176,17 @@ void simulate_program(struct OperationArray *operations)
                         op.loc.filename, op.loc.line, op.loc.collumn);
                 goto simulate_program_exit;
             }
-            a = Stack_pop(&value_stack);
-            b = Stack_pop(&value_stack);
-            Stack_push(&value_stack, a + b);
+            a = Stack_size_t_pop(&value_stack);
+            b = Stack_size_t_pop(&value_stack);
+            Stack_size_t_push(&value_stack, a + b);
             break;
         case VALUE:
-            Stack_push(&value_stack, op.value);
+            Stack_size_t_push(&value_stack, op.value);
             break;
         }
     }
 simulate_program_exit:
-    Stack_free(&value_stack);
+    Stack_size_t_free(&value_stack);
 }
 
 void compile_program(struct OperationArray *operations)
@@ -234,6 +270,7 @@ int main(int argc, char *argv[])
     struct OperationArray operations;
     OperationArray_init(&operations);
     parse_file(&operations, argv[2]);
+    reverse_expression_order(&operations);
 
     if (strcmp(subcommand, "sim") == 0)
     {

@@ -1,14 +1,13 @@
 #include <stdlib.h>
-#include <stdio.h>
 
-struct Stack
+struct Stack_size_t
 {
     size_t *start;
     int size;
     int capacity;
 };
 
-void Stack_init(struct Stack *array)
+void Stack_size_t_init(struct Stack_size_t *array)
 {
     const int initial_size = 8;
     array->start = malloc(sizeof(size_t) * initial_size);
@@ -16,7 +15,7 @@ void Stack_init(struct Stack *array)
     array->capacity = initial_size;
 }
 
-void Stack_free(struct Stack *array)
+void Stack_size_t_free(struct Stack_size_t *array)
 {
     free(array->start);
     array->start = 0;
@@ -24,7 +23,7 @@ void Stack_free(struct Stack *array)
     array->capacity = 0;
 }
 
-void Stack_push(struct Stack *array, size_t n)
+void Stack_size_t_push(struct Stack_size_t *array, size_t n)
 {
     array->start[array->size] = n;
     array->size++;
@@ -35,7 +34,7 @@ void Stack_push(struct Stack *array, size_t n)
     }
 }
 
-size_t Stack_pop(struct Stack *array)
+size_t Stack_size_t_pop(struct Stack_size_t *array)
 {
     if (array->size == 0)
     {

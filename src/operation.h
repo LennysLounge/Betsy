@@ -19,6 +19,8 @@ struct Operation
 {
     struct Location loc;
     enum OperationType type;
+    int nr_outputs;
+    int nr_inputs;
     int value;
 };
 
@@ -56,20 +58,38 @@ void OperationArray_add(struct OperationArray *array, struct Operation operation
     }
 }
 
+void OperationArray_clear(struct OperationArray *array)
+{
+    array->size = 0;
+}
+
 struct Operation make_INT(struct Location loc, int v)
 {
-    struct Operation op = {.loc = loc, .type = VALUE, .value = v};
+    struct Operation op;
+    op.loc = loc;
+    op.type = VALUE;
+    op.nr_inputs = 0;
+    op.nr_outputs = 1;
+    op.value = v;
     return op;
 }
 
 struct Operation make_PRINT(struct Location loc)
 {
-    struct Operation op = {.loc = loc, .type = PRINT};
+    struct Operation op;
+    op.loc = loc;
+    op.type = PRINT;
+    op.nr_inputs = 1;
+    op.nr_outputs = 0;
     return op;
 }
 
 struct Operation make_PLUS(struct Location loc)
 {
-    struct Operation op = {.loc = loc, .type = PLUS};
+    struct Operation op;
+    op.loc = loc;
+    op.type = PLUS;
+    op.nr_inputs = 2;
+    op.nr_outputs = 1;
     return op;
 }
