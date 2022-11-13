@@ -124,14 +124,14 @@ void reverse_expression_order(struct OperationArray *operations)
     struct OperationArray new_ops;
     OperationArray_init(&new_ops);
 
-    struct Stack_tuple operation_stack;
-    Stack_tuple_init(&operation_stack);
+    struct Stack_tuple expression_stack;
+    Stack_tuple_init(&expression_stack);
 
     int values_available = 0;
     for (int i = 0; i < operations->size; i++)
     {
         struct Tuple t = {i, values_available + operations->start[i].nr_inputs};
-        Stack_tuple_push(&operation_stack, t);
+        Stack_tuple_push(&expression_stack, t);
 
         struct Tuple current_op = t;
         while (values_available >= current_op.required_size)
@@ -139,18 +139,36 @@ void reverse_expression_order(struct OperationArray *operations)
             struct Operation op = operations->start[current_op.index];
             OperationArray_add(&new_ops, op);
             values_available += op.nr_outputs - op.nr_inputs;
-            Stack_tuple_pop(&operation_stack);
-            if (operation_stack.size == 0)
+            Stack_tuple_pop(&expression_stack);
+            if (expression_stack.size == 0)
+            {
+                if (values_available > 0)
+                {
+                    fprintf(stdout, "%s:%d:%d WARNING: Unhandled data after expression.\n",
+                            op.loc.filename, op.loc.line, op.loc.collumn);
+                }
+                values_available = 0;
                 break;
-            current_op = Stack_tuple_peek(&operation_stack);
+            }
+            current_op = Stack_tuple_peek(&expression_stack);
         }
     }
+
+    if (expression_stack.size != 0)
+    {
+        struct Operation op = operations->start[Stack_tuple_peek(&expression_stack).index];
+        fprintf(stderr, "%s:%d:%d ERROR: Unfinished expression.\n",
+                op.loc.filename, op.loc.line, op.loc.collumn);
+        exit(1);
+    }
+
     OperationArray_clear(operations);
     for (int i = 0; i < new_ops.size; i++)
     {
         OperationArray_add(operations, new_ops.start[i]);
     }
     OperationArray_free(&new_ops);
+    Stack_tuple_free(&expression_stack);
 }
 
 void simulate_program(struct OperationArray *operations)

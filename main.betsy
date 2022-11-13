@@ -1,4 +1,7 @@
-print + 35 + 17 17
+print + 35 + 17 17 
+50
+print 10
+print 20
+print 30 100
 
-print + 400 20
 
