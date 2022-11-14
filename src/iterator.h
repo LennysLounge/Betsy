@@ -26,11 +26,21 @@ bool Iterator_hasNext(struct Iterator *iter)
 
 void *Iterator_next(struct Iterator *iter)
 {
-    if (iter->index >= iter->array->length)
-    {
+    if (!Iterator_hasNext(iter))
         return 0;
-    }
     return Array_get(iter->array, iter->index++);
+}
+
+void *Iterator_peekNext(struct Iterator *iter)
+{
+    if (!Iterator_hasNext(iter))
+        return 0;
+    return Array_get(iter->array, iter->index);
+}
+
+void *Iterator_peekNow(struct Iterator *iter)
+{
+    return Array_get(iter->array, iter->index);
 }
 
 #endif

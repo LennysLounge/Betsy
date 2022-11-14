@@ -17,5 +17,6 @@ void Expression_free(struct Expression *exp)
     {
         Operation_free(Array_get(&exp->operations, i));
     }
+    Array_free(&exp->operations);
 }
 #endif

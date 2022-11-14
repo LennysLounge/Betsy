@@ -3,11 +3,13 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 
 #include "operation.h"
 #include "array.h"
 #include "iterator.h"
 #include "expression.h"
+#include "statement.h"
 
 char *read_entire_file(char *filename)
 {
@@ -111,14 +113,18 @@ void parse_file(struct Array *operations, char *filename)
         // Create operation
         struct Operation op;
         int value;
+        assert(INTRINSIC_TYPE_COUNT == 2 && "Exhaustive handling of intrinsic types");
+        assert(KEYWORD_TYPE_COUNT == 1 && "Exhaustive handling of keyword types");
         if (strcmp(token, "print") == 0)
             op = OP_PRINT;
         else if (strcmp(token, "+") == 0)
             op = OP_PLUS;
+        else if (strcmp(token, "if") == 0)
+            op = KEYWORD_IF;
         else if (sntoi(token, &value))
         {
-            op = OP_INT;
-            op.value = value;
+            op = VALUE_INT;
+            op.value.value = value;
         }
         else
         {
@@ -143,6 +149,13 @@ struct Tuple
 
 struct Expression parse_expression(struct Iterator *operations_iter)
 {
+    if (!Iterator_hasNext(operations_iter))
+    {
+        struct Operation *prev_op = Array_get(operations_iter->array, operations_iter->index - 1);
+        fprintf(stderr, "%s:%d:%d ERROR: Expected an expression but got nothing.",
+                prev_op->loc.filename, prev_op->loc.line, prev_op->loc.collumn + (int)strlen(prev_op->token));
+        exit(1);
+    }
     struct Expression exp;
     Array_init(&exp.operations, sizeof(struct Operation));
 
@@ -154,20 +167,47 @@ struct Expression parse_expression(struct Iterator *operations_iter)
     {
         int i = operations_iter->index;
         struct Operation *op = (struct Operation *)Iterator_next(operations_iter);
-        struct Tuple t = {i, values_available + op->nr_inputs};
-        Array_add(&stack, &t);
 
-        struct Tuple current_op = t;
-        while (values_available >= current_op.required_size)
+        if (op->type == VALUE)
         {
-            struct Operation *stack_op = Array_get(operations_iter->array, current_op.index);
+            values_available++;
+            Array_add(&exp.operations, op);
+        }
+        else if (op->type == INTRINSIC)
+        {
+            if (op->intrinsic.nr_inputs == 0)
+            {
+                values_available += op->intrinsic.nr_outputs;
+                Array_add(&exp.operations, op);
+            }
+            else
+            {
+                struct Tuple t = {i, values_available + op->intrinsic.nr_inputs};
+                Array_add(&stack, &t);
+            }
+        }
+        else
+        {
+            fprintf(stderr, "%s:%d:%d ERROR: The word '%s' is not a valid operation in an expression. Only intrinsics and values are allowed in expressions for now.\n",
+                    op->loc.filename, op->loc.line, op->loc.collumn, op->token);
+            exit(1);
+            break;
+        }
+        if (stack.length == 0)
+        {
+            break;
+        }
+        struct Tuple *current_op = Array_top(&stack);
+        while (values_available >= current_op->required_size)
+        {
+            struct Operation *stack_op = Array_get(operations_iter->array, current_op->index);
             Array_add(&exp.operations, stack_op);
 
-            values_available += stack_op->nr_outputs - stack_op->nr_inputs;
+            values_available += stack_op->intrinsic.nr_outputs - stack_op->intrinsic.nr_inputs;
             Array_pop(&stack);
             if (stack.length == 0)
                 goto expression_finished;
-            current_op = *((struct Tuple *)Array_top(&stack));
+            current_op = Array_top(&stack);
         }
     }
 expression_finished:
@@ -179,8 +219,8 @@ expression_finished:
                 op->loc.filename, op->loc.line, op->loc.collumn, op->token);
         fprintf(stderr, "%s:%d:%d NOTE:  The operation '%s' takes %d input%s ",
                 op->loc.filename, op->loc.line, op->loc.collumn, op->token,
-                op->nr_inputs, op->nr_inputs > 1 ? "s" : "");
-        int inputs_provided = op->nr_inputs - top_tuple->required_size + values_available;
+                op->intrinsic.nr_inputs, op->intrinsic.nr_inputs > 1 ? "s" : "");
+        int inputs_provided = op->intrinsic.nr_inputs - top_tuple->required_size + values_available;
         fprintf(stderr, "but %s%d %s provided.\n",
                 inputs_provided > 0 ? "only " : "",
                 inputs_provided,
@@ -188,6 +228,7 @@ expression_finished:
         // TODO: Maybe we can just log the error and continue.
         exit(1);
     }
+
     exp.nr_outputs = values_available;
     Array_free(&stack);
     return exp;
@@ -198,58 +239,164 @@ void parse_program(struct Array *program, struct Array *operations)
     struct Iterator iter_ops = Iterator_create(operations);
     while (Iterator_hasNext(&iter_ops))
     {
-        struct Expression exp = parse_expression(&iter_ops);
-        Array_add(program, &exp);
+        struct Operation *op = Iterator_peekNext(&iter_ops);
+        assert(OPERATION_TYPE_COUNT == 3 && "Exhaustive handling of Operation types.");
+        if (op->type == KEYWORD)
+        {
+            assert(KEYWORD_TYPE_COUNT == 1 && "Exhaustive handling of Keywords");
+            switch (op->keyword.type)
+            {
+            case KEYWORD_TYPE_IF:
+                Iterator_next(&iter_ops);
+
+                struct Statement statement;
+                statement.type = STATEMENT_TYPE_IF;
+                statement.iff.condition = parse_expression(&iter_ops);
+                statement.iff.action = parse_expression(&iter_ops);
+                Array_add(program, &statement);
+
+                break;
+            default:
+                fprintf(stderr, "Unhandled keyword type '%d' in 'prase_program'\n", op->keyword.type);
+                exit(1);
+            }
+        }
+        else
+        {
+            struct Statement statement;
+            statement.type = STATEMENT_TYPE_EXP;
+            statement.expression = parse_expression(&iter_ops);
+            Array_add(program, &statement);
+        }
+    }
+}
+
+void simulate_expression(struct Expression exp, struct Array *outputs)
+{
+    Array_init(outputs, sizeof(size_t));
+
+    for (int j = 0; j < exp.operations.length; j++)
+    {
+        struct Operation *op = Array_get(&exp.operations, j);
+        size_t a, b;
+        //_Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
+        switch (op->type)
+        {
+        case INTRINSIC:
+            switch (op->intrinsic.type)
+            {
+            case PRINT:
+                if (outputs->length < 1)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+                a = *((size_t *)Array_pop(outputs));
+                printf("%zd\n", a);
+                break;
+            case PLUS:
+                if (outputs->length < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+                a = *((size_t *)Array_pop(outputs));
+                b = *((size_t *)Array_pop(outputs));
+                b = a + b;
+                Array_add(outputs, &b);
+                break;
+            }
+            break;
+        case VALUE:
+            Array_add(outputs, &op->value.value);
+            break;
+        }
     }
 }
 
 void simulate_program(struct Array *program)
 {
-    struct Array stack;
-    Array_init(&stack, sizeof(int));
+    struct Array exp_output;
+    Array_init(&exp_output, sizeof(size_t));
 
     for (int i = 0; i < program->length; i++)
     {
-        struct Expression *exp = Array_get(program, i);
-        stack.length = 0;
-
-        for (int j = 0; j < exp->operations.length; j++)
+        struct Statement *statement = Array_get(program, i);
+        if (statement->type == STATEMENT_TYPE_EXP)
         {
-            struct Operation *op = Array_get(&exp->operations, j);
-            int a, b;
-            _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
-            switch (op->type)
+            simulate_expression(statement->expression, &exp_output);
+        }
+        else if (statement->type == STATEMENT_TYPE_IF)
+        {
+            simulate_expression(statement->iff.condition, &exp_output);
+            if (exp_output.length != 1)
+            {
+                struct Operation *op = Array_top(&statement->iff.condition.operations);
+                fprintf(stderr, "%s:%d:%d ERROR: If condition must produce exactly one output.\n",
+                        op->loc.filename, op->loc.line, op->loc.collumn);
+                exit(1);
+            }
+            size_t result = *((size_t *)Array_get(&exp_output, 0));
+            if (result == 0)
+            {
+                simulate_expression(statement->iff.action, &exp_output);
+            }
+        }
+        else
+        {
+            fprintf(stderr, "ERROR: Statement type %d not implement yet in 'simulate_program'.\n", statement->type);
+            exit(1);
+        }
+    }
+}
+
+void compile_expression(FILE *output, struct Expression exp, int *max_stack_size)
+{
+    int stack_size = 0;
+
+    for (int j = 0; j < exp.operations.length; j++)
+    {
+        struct Operation *op = Array_get(&exp.operations, j);
+        //_Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
+        switch (op->type)
+        {
+        case INTRINSIC:
+            switch (op->intrinsic.type)
             {
             case PRINT:
-                if (stack.length < 1)
+                if (stack_size < 1)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
-                    goto simulate_program_exit;
+                    exit(1);
                 }
-                a = *((int *)Array_pop(&stack));
-                printf("%d\n", a);
+                stack_size--;
+                fprintf(output, "    printf(\"%%d\\n\", stack_%03d);\n", stack_size);
                 break;
             case PLUS:
-                if (stack.length < 2)
+                if (stack_size < 2)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
-                    goto simulate_program_exit;
+                    exit(1);
                 }
-                a = *((int *)Array_pop(&stack));
-                b = *((int *)Array_pop(&stack));
-                b = a + b;
-                Array_add(&stack, &b);
-                break;
-            case VALUE:
-                Array_add(&stack, &op->value);
+                stack_size--;
+                fprintf(output, "    stack_%03d = stack_%03d + stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
                 break;
             }
+            break;
+        case VALUE:
+            fprintf(output, "    %sstack_%03d = %d;\n",
+                    (stack_size == *max_stack_size) ? "int " : "",
+                    stack_size, op->value.value);
+            stack_size++;
+            break;
         }
+        if (stack_size > *max_stack_size)
+            *max_stack_size = stack_size;
     }
-simulate_program_exit:
-    Array_free(&stack);
 }
 
 void compile_program(struct Array *program)
@@ -264,55 +411,34 @@ void compile_program(struct Array *program)
     fprintf(output, "#include <stdio.h>\n");
     fprintf(output, "int main(int argc, char *argv[])\n");
     fprintf(output, "{\n");
-    int stack_size = 0;
     int maximum_stack_size = 0;
     for (int i = 0; i < program->length; i++)
     {
-        struct Expression *exp = Array_get(program, i);
-        stack_size = 0;
+        struct Statement *statement = Array_get(program, i);
 
-        fprintf(output, "\n");
-
-        for (int j = 0; j < exp->operations.length; j++)
+        switch (statement->type)
         {
-            struct Operation *op = Array_get(&exp->operations, j);
-            _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
-            switch (op->type)
-            {
-            case PRINT:
-                if (stack_size < 1)
-                {
-                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
-                            op->loc.filename, op->loc.line, op->loc.collumn);
-                    goto compile_program_exit;
-                }
-                stack_size--;
-                fprintf(output, "    printf(\"%%d\\n\", stack_%03d);\n", stack_size);
-                break;
-            case PLUS:
-                if (stack_size < 2)
-                {
-                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
-                            op->loc.filename, op->loc.line, op->loc.collumn);
-                    goto compile_program_exit;
-                }
-                stack_size--;
-                fprintf(output, "    stack_%03d = stack_%03d + stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
-                break;
-            case VALUE:
-                fprintf(output, "    %sstack_%03d = %d;\n",
-                        (stack_size == maximum_stack_size) ? "int " : "",
-                        stack_size, op->value);
-                stack_size++;
-                break;
-            }
-            if (stack_size > maximum_stack_size)
-                maximum_stack_size = stack_size;
+        case STATEMENT_TYPE_EXP:
+            struct Expression exp = statement->expression;
+            compile_expression(output, exp, &maximum_stack_size);
+            printf("\n");
+            break;
+        case STATEMENT_TYPE_IF:
+            compile_expression(output, statement->iff.condition, &maximum_stack_size);
+            fprintf(output, "    if (stack_000 == 0)\n");
+            fprintf(output, "    {\n");
+            compile_expression(output, statement->iff.action, &maximum_stack_size);
+            fprintf(output, "    }\n\n");
+            break;
+        default:
+            fprintf(stderr, "ERROR: Statement type '%d' not implemented yet in 'compile_program'\n", statement->type);
+            exit(1);
         }
     }
     fprintf(output, "    return 0;\n");
     fprintf(output, "}\n");
 compile_program_exit:
+    fclose(output);
     return;
 }
 
@@ -328,14 +454,39 @@ void print_program(struct Array *program)
 {
     for (int j = 0; j < program->length; j++)
     {
-        struct Expression *exp = Array_get(program, j);
-        printf("out:%d\t", exp->nr_outputs);
-        for (int i = 0; i < exp->operations.length; i++)
+        struct Statement *statement = Array_get(program, j);
+        printf("%2d: type:%d | ", j, statement->type);
+
+        switch (statement->type)
         {
-            struct Operation *op = Array_get(&exp->operations, i);
-            printf("%s ", op->token);
+        case STATEMENT_TYPE_EXP:
+            printf("out:%d\t", statement->expression.nr_outputs);
+            for (int i = 0; i < statement->expression.operations.length; i++)
+            {
+                struct Operation *op = Array_get(&statement->expression.operations, i);
+                printf("%s ", op->token);
+            }
+            printf("\n");
+            break;
+        case STATEMENT_TYPE_IF:
+            printf("condition: ");
+            for (int i = 0; i < statement->iff.condition.operations.length; i++)
+            {
+                struct Operation *op = Array_get(&statement->iff.condition.operations, i);
+                printf("%s ", op->token);
+            }
+            printf("\t action: ");
+            for (int i = 0; i < statement->iff.action.operations.length; i++)
+            {
+                struct Operation *op = Array_get(&statement->iff.action.operations, i);
+                printf("%s ", op->token);
+            }
+            printf("\n");
+            break;
+        default:
+            printf("ERROR: Statement type %d not implemented yet.\n", statement->type);
+            break;
         }
-        printf("\n");
     }
 }
 
@@ -360,7 +511,7 @@ int main(int argc, char *argv[])
     parse_file(&operations, argv[2]);
 
     struct Array program;
-    Array_init(&program, sizeof(struct Expression));
+    Array_init(&program, sizeof(struct Statement));
 
     parse_program(&program, &operations);
 
@@ -381,8 +532,8 @@ int main(int argc, char *argv[])
     // print_program(&program);
     for (int i = 0; i < program.length; i++)
     {
-        struct Expression *exp = Array_get(&program, i);
-        Expression_free(exp);
+        struct Statement *statement = Array_get(&program, i);
+        Statement_free(statement);
     }
     Array_free(&program);
     Array_free(&operations);

@@ -5,10 +5,23 @@
 
 enum OperationType
 {
-    PRINT,
-    PLUS,
+    KEYWORD,
+    INTRINSIC,
     VALUE,
     OPERATION_TYPE_COUNT
+};
+
+enum IntrinsicType
+{
+    PRINT,
+    PLUS,
+    INTRINSIC_TYPE_COUNT
+};
+
+enum KeywordType
+{
+    KEYWORD_TYPE_IF,
+    KEYWORD_TYPE_COUNT
 };
 
 struct Location
@@ -18,14 +31,34 @@ struct Location
     int line;
 };
 
+struct Intrinsic
+{
+    enum IntrinsicType type;
+    int nr_outputs;
+    int nr_inputs;
+};
+
+struct Keyword
+{
+    enum KeywordType type;
+};
+
+struct Value
+{
+    int value;
+};
+
 struct Operation
 {
     struct Location loc;
     char *token;
     enum OperationType type;
-    int nr_outputs;
-    int nr_inputs;
-    int value;
+    union
+    {
+        struct Intrinsic intrinsic;
+        struct Keyword keyword;
+        struct Value value;
+    };
 };
 
 void Operation_free(struct Operation *op)
@@ -33,8 +66,11 @@ void Operation_free(struct Operation *op)
     free(op->token);
 }
 
-const struct Operation OP_PRINT = {.type = PRINT, .nr_inputs = 1, .nr_outputs = 0};
-const struct Operation OP_PLUS = {.type = PLUS, .nr_inputs = 2, .nr_outputs = 1};
-const struct Operation OP_INT = {.type = VALUE, .nr_inputs = 0, .nr_outputs = 1};
+const struct Operation OP_PRINT = {.type = INTRINSIC, .intrinsic.type = PRINT, .intrinsic.nr_inputs = 1, .intrinsic.nr_outputs = 0};
+const struct Operation OP_PLUS = {.type = INTRINSIC, .intrinsic.type = PLUS, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
+
+const struct Operation VALUE_INT = {.type = VALUE, .value = 0};
+
+const struct Operation KEYWORD_IF = {.type = KEYWORD, .keyword.type = KEYWORD_TYPE_IF};
 
 #endif
