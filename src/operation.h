@@ -1,3 +1,6 @@
+#ifndef OPERATION_H
+#define OPERATION_H
+
 #include <stdlib.h>
 
 enum OperationType
@@ -18,78 +21,20 @@ struct Location
 struct Operation
 {
     struct Location loc;
+    char *token;
     enum OperationType type;
     int nr_outputs;
     int nr_inputs;
     int value;
 };
 
-struct OperationArray
+void Operation_free(struct Operation *op)
 {
-    struct Operation *start;
-    int size;
-    int capacity;
-};
-
-void OperationArray_init(struct OperationArray *array)
-{
-    const int initial_size = 8;
-    array->start = malloc(sizeof(struct Operation) * initial_size);
-    array->size = 0;
-    array->capacity = initial_size;
+    free(op->token);
 }
 
-void OperationArray_free(struct OperationArray *array)
-{
-    free(array->start);
-    array->start = 0;
-    array->size = 0;
-    array->capacity = 0;
-}
+const struct Operation OP_PRINT = {.type = PRINT, .nr_inputs = 1, .nr_outputs = 0};
+const struct Operation OP_PLUS = {.type = PLUS, .nr_inputs = 2, .nr_outputs = 1};
+const struct Operation OP_INT = {.type = VALUE, .nr_inputs = 0, .nr_outputs = 1};
 
-void OperationArray_add(struct OperationArray *array, struct Operation operation)
-{
-    array->start[array->size] = operation;
-    array->size++;
-    if (array->size == array->capacity)
-    {
-        array->start = realloc(array->start, sizeof(struct Operation) * array->capacity * 2);
-        array->capacity = array->capacity * 2;
-    }
-}
-
-void OperationArray_clear(struct OperationArray *array)
-{
-    array->size = 0;
-}
-
-struct Operation make_INT(struct Location loc, int v)
-{
-    struct Operation op;
-    op.loc = loc;
-    op.type = VALUE;
-    op.nr_inputs = 0;
-    op.nr_outputs = 1;
-    op.value = v;
-    return op;
-}
-
-struct Operation make_PRINT(struct Location loc)
-{
-    struct Operation op;
-    op.loc = loc;
-    op.type = PRINT;
-    op.nr_inputs = 1;
-    op.nr_outputs = 0;
-    return op;
-}
-
-struct Operation make_PLUS(struct Location loc)
-{
-    struct Operation op;
-    op.loc = loc;
-    op.type = PLUS;
-    op.nr_inputs = 2;
-    op.nr_outputs = 1;
-    return op;
-}
+#endif

@@ -12,6 +12,9 @@ To further reduce the complexity of the syntax i use polish notation for express
 Compiler options are set in the main betsy file.
 This reduces the need for dedicated build tools since the langue itself it its own build too.
 ```
+compiler OPTION VALUE
+```
+```
 compiler output_c_file true
 compiler optimisation_level 3
 
@@ -23,6 +26,9 @@ compiler lib kernel32.lib
 
 Include other betsy files using `using`
 ```
+using FILE_PATH
+```
+```
 using std.betsy
 using lists.betsy
 using concurrency.betsy
@@ -31,13 +37,19 @@ using ./test-package/greeter.betsy
 
 ##           Declaring variables
 Declare a variable using `var`.
-A variable has a name, a type and optionally a value.
+A variable has a name, a type and optionally a value.   
+```
+var ID TYPE exp<TYPE>
+```
 ```
 var a int
 var b int 12
 var c int * b 2             # expressions are evaluated
 ```
 Assign a value to a variable using `set`.
+```
+set ID exp<typeof(ID)>
+```
 ```
 set a 4
 set b c
@@ -70,15 +82,25 @@ print / 12 + 96 * 6 8       # prints 12
 Branching with `if`, `elif`, and `else`.
 The words `do` and `end` create a block with a new scope (more in section Blocks).
 ```
+if exp<BOOL> exp<BLOCK>
+elif exp<BOOL> exp<BLOCK>
+else exp<BLOCK>
+```
+```
 if < n 16 do
     "n is smaller than 16" print
+end
 elif > n 16 do
     "n is greater than 16" print
-else
+end
+else do
     "n is equal to 16" print
 end
 ```
 Loop are done using 'while'.
+```
+while exp<BOOL> exp<BLOCK>
+```
 ```
 var n int 0
 while < n 20 do
@@ -97,9 +119,12 @@ while n int 0 < n 20 do
     set n + n 1
 end
 ```
-Or using keyword `loop`.
+Or using keyword `with`.
 ```
-loop n int 0 while < n 20 do
+with ID TYPE exp<TYPE> while exp<BOOL> exp<BLOCK>
+```
+```
+with n int 0 while < n 20 do
     print n
     set n + n 1
 end
@@ -209,6 +234,9 @@ print counterB              # 3
 == THIS STUFF IS NOT VERY THOUGHT OUT ==
 
 Run a function for each element in an iterable.
+```
+foreach ID exp<FN typeof(ID) END>
+```
 ```
 foreach list fn n int do
     print n

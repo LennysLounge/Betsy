@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "operation.h"
-#include "stack_size_t.h"
-#include "stack_tuple.h"
+#include "array.h"
+#include "iterator.h"
+#include "expression.h"
 
 char *read_entire_file(char *filename)
 {
@@ -28,29 +30,33 @@ char *read_entire_file(char *filename)
     return file_text;
 }
 
-bool find_next_word(char *file_text, int start_pos, int *word_start, int *word_length, int *word_collumn, int *word_line)
+struct FileIterator
 {
-    int pos = start_pos;
-    int current_line_start = 0;
+    int start;
+    int length;
+    int line;
+    int line_collumn_start;
+};
+
+bool find_next_word(char *file_text, struct FileIterator *iter)
+{
+    int pos = iter->start + iter->length;
     // find start of the next word
     while (1)
     {
         if (file_text[pos] == 0)
         {
-            *word_start = -1;
-            *word_length = 0;
             return false;
         }
         else if (isgraph(file_text[pos]))
         {
-            *word_start = pos;
-            *word_collumn = pos - current_line_start;
+            iter->start = pos;
             break;
         }
         else if (file_text[pos] == '\n')
         {
-            (*word_line)++;
-            current_line_start = pos;
+            iter->line++;
+            iter->line_collumn_start = pos + 1;
         }
         pos++;
     }
@@ -58,15 +64,15 @@ bool find_next_word(char *file_text, int start_pos, int *word_start, int *word_l
     // find end of the current word
     while (isgraph(file_text[pos]))
         pos++;
-    *word_length = pos - *word_start;
+    iter->length = pos - iter->start;
     return true;
 }
 
-bool sntoi(char *word, int length, int *out)
+bool sntoi(char *word, int *out)
 {
     int value = 0;
     int i = 0;
-    while (word[i] != 0 && i < length)
+    while (word[i] != 0)
     {
         if (word[i] < 48 || word[i] > 57)
         {
@@ -79,135 +85,174 @@ bool sntoi(char *word, int length, int *out)
     return true;
 }
 
-void parse_file(struct OperationArray *operations, char *filename)
+void parse_file(struct Array *operations, char *filename)
 {
     char *file_text = read_entire_file(filename);
 
-    int start = 0;
-    int length = 0;
-    int collumn = 0;
-    int line = 0;
-    while (find_next_word(file_text, start, &start, &length, &collumn, &line))
+    struct FileIterator iter = {0};
+    while (find_next_word(file_text, &iter))
     {
-        char *token = file_text + start;
-        struct Location location = {.filename = filename, .collumn = collumn + 1, .line = line + 1};
-        _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of operation types");
-        if (strncmp(token, "print", length) == 0)
+        // Create null terminated token
+        char *token = malloc(iter.length + 1);
+        if (token == NULL)
         {
-            OperationArray_add(operations, make_PRINT(location));
+            fprintf(stderr, "ERROR: Allocation error in %s:%d\n", __FILE__, __LINE__);
+            exit(0);
         }
-        else if (strncmp(token, "+", length) == 0)
+        strncpy(token, file_text + iter.start, iter.length);
+        token[iter.length] = 0;
+
+        // Create location
+        struct Location loc;
+        loc.filename = filename;
+        loc.line = iter.line + 1;
+        loc.collumn = iter.start - iter.line_collumn_start + 1;
+
+        // Create operation
+        struct Operation op;
+        int value;
+        if (strcmp(token, "print") == 0)
+            op = OP_PRINT;
+        else if (strcmp(token, "+") == 0)
+            op = OP_PLUS;
+        else if (sntoi(token, &value))
         {
-            OperationArray_add(operations, make_PLUS(location));
+            op = OP_INT;
+            op.value = value;
         }
         else
         {
-            int value = 0;
-            if (sntoi(token, length, &value))
-            {
-                OperationArray_add(operations, make_INT(location, value));
-            }
-            else
-            {
-                fprintf(stderr, "%s:%d:%d ERROR: '%.*s' is not a valid word.",
-                        location.filename, location.line, location.collumn, length, token);
-                exit(1);
-            }
+            fprintf(stderr, "%s:%d:%d ERROR: '%s' is not a valid word.",
+                    loc.filename, loc.line, loc.collumn, token);
+            exit(1);
         }
-        start += length;
+
+        // Assign token and location to op.
+        op.loc = loc;
+        op.token = token;
+        Array_add(operations, &op);
     }
     free(file_text);
 }
 
-void reverse_expression_order(struct OperationArray *operations)
+struct Tuple
 {
-    struct OperationArray new_ops;
-    OperationArray_init(&new_ops);
+    int index;
+    int required_size;
+};
 
-    struct Stack_tuple expression_stack;
-    Stack_tuple_init(&expression_stack);
+struct Expression parse_expression(struct Iterator *operations_iter)
+{
+    struct Expression exp;
+    Array_init(&exp.operations, sizeof(struct Operation));
+
+    struct Array stack;
+    Array_init(&stack, sizeof(struct Tuple));
 
     int values_available = 0;
-    for (int i = 0; i < operations->size; i++)
+    while (Iterator_hasNext(operations_iter))
     {
-        struct Tuple t = {i, values_available + operations->start[i].nr_inputs};
-        Stack_tuple_push(&expression_stack, t);
+        int i = operations_iter->index;
+        struct Operation *op = (struct Operation *)Iterator_next(operations_iter);
+        struct Tuple t = {i, values_available + op->nr_inputs};
+        Array_add(&stack, &t);
 
         struct Tuple current_op = t;
         while (values_available >= current_op.required_size)
         {
-            struct Operation op = operations->start[current_op.index];
-            OperationArray_add(&new_ops, op);
-            values_available += op.nr_outputs - op.nr_inputs;
-            Stack_tuple_pop(&expression_stack);
-            if (expression_stack.size == 0)
-            {
-                if (values_available > 0)
-                {
-                    fprintf(stdout, "%s:%d:%d WARNING: Unhandled data after expression.\n",
-                            op.loc.filename, op.loc.line, op.loc.collumn);
-                }
-                values_available = 0;
-                break;
-            }
-            current_op = Stack_tuple_peek(&expression_stack);
+            struct Operation *stack_op = Array_get(operations_iter->array, current_op.index);
+            Array_add(&exp.operations, stack_op);
+
+            values_available += stack_op->nr_outputs - stack_op->nr_inputs;
+            Array_pop(&stack);
+            if (stack.length == 0)
+                goto expression_finished;
+            current_op = *((struct Tuple *)Array_top(&stack));
         }
     }
-
-    if (expression_stack.size != 0)
+expression_finished:
+    if (stack.length != 0)
     {
-        struct Operation op = operations->start[Stack_tuple_peek(&expression_stack).index];
-        fprintf(stderr, "%s:%d:%d ERROR: Unfinished expression.\n",
-                op.loc.filename, op.loc.line, op.loc.collumn);
+        struct Tuple *top_tuple = (struct Tuple *)Array_top(&stack);
+        struct Operation *op = (struct Operation *)Array_get(operations_iter->array, top_tuple->index);
+        fprintf(stderr, "%s:%d:%d ERROR: Unfinished expression '%s'.\n",
+                op->loc.filename, op->loc.line, op->loc.collumn, op->token);
+        fprintf(stderr, "%s:%d:%d NOTE:  The operation '%s' takes %d input%s ",
+                op->loc.filename, op->loc.line, op->loc.collumn, op->token,
+                op->nr_inputs, op->nr_inputs > 1 ? "s" : "");
+        int inputs_provided = op->nr_inputs - top_tuple->required_size + values_available;
+        fprintf(stderr, "but %s%d %s provided.\n",
+                inputs_provided > 0 ? "only " : "",
+                inputs_provided,
+                inputs_provided == 1 ? "was" : "were");
+        // TODO: Maybe we can just log the error and continue.
         exit(1);
     }
-
-    OperationArray_clear(operations);
-    for (int i = 0; i < new_ops.size; i++)
-    {
-        OperationArray_add(operations, new_ops.start[i]);
-    }
-    OperationArray_free(&new_ops);
-    Stack_tuple_free(&expression_stack);
+    exp.nr_outputs = values_available;
+    Array_free(&stack);
+    return exp;
 }
 
-void simulate_program(struct OperationArray *operations)
+void parse_program(struct Array *program, struct Array *operations)
 {
-    struct Stack_size_t value_stack;
-    Stack_size_t_init(&value_stack);
-
-    for (int i = 0; i < operations->size; i++)
+    struct Iterator iter_ops = Iterator_create(operations);
+    while (Iterator_hasNext(&iter_ops))
     {
-        _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
-        struct Operation op = operations->start[i];
-        int a, b;
-        switch (op.type)
+        struct Expression exp = parse_expression(&iter_ops);
+        Array_add(program, &exp);
+    }
+}
+
+void simulate_program(struct Array *program)
+{
+    struct Array stack;
+    Array_init(&stack, sizeof(int));
+
+    for (int i = 0; i < program->length; i++)
+    {
+        struct Expression *exp = Array_get(program, i);
+        stack.length = 0;
+
+        for (int j = 0; j < exp->operations.length; j++)
         {
-        case PRINT:
-            a = Stack_size_t_pop(&value_stack);
-            printf("%d\n", a);
-            break;
-        case PLUS:
-            if (value_stack.size < 2)
+            struct Operation *op = Array_get(&exp->operations, j);
+            int a, b;
+            _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
+            switch (op->type)
             {
-                fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
-                        op.loc.filename, op.loc.line, op.loc.collumn);
-                goto simulate_program_exit;
+            case PRINT:
+                if (stack.length < 1)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    goto simulate_program_exit;
+                }
+                a = *((int *)Array_pop(&stack));
+                printf("%d\n", a);
+                break;
+            case PLUS:
+                if (stack.length < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    goto simulate_program_exit;
+                }
+                a = *((int *)Array_pop(&stack));
+                b = *((int *)Array_pop(&stack));
+                b = a + b;
+                Array_add(&stack, &b);
+                break;
+            case VALUE:
+                Array_add(&stack, &op->value);
+                break;
             }
-            a = Stack_size_t_pop(&value_stack);
-            b = Stack_size_t_pop(&value_stack);
-            Stack_size_t_push(&value_stack, a + b);
-            break;
-        case VALUE:
-            Stack_size_t_push(&value_stack, op.value);
-            break;
         }
     }
 simulate_program_exit:
-    Stack_size_t_free(&value_stack);
+    Array_free(&stack);
 }
 
-void compile_program(struct OperationArray *operations)
+void compile_program(struct Array *program)
 {
     FILE *output = fopen("out.c", "w");
     if (output == NULL)
@@ -221,41 +266,49 @@ void compile_program(struct OperationArray *operations)
     fprintf(output, "{\n");
     int stack_size = 0;
     int maximum_stack_size = 0;
-    for (int i = 0; i < operations->size; i++)
+    for (int i = 0; i < program->length; i++)
     {
-        _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
-        struct Operation op = operations->start[i];
-        switch (op.type)
+        struct Expression *exp = Array_get(program, i);
+        stack_size = 0;
+
+        fprintf(output, "\n");
+
+        for (int j = 0; j < exp->operations.length; j++)
         {
-        case PRINT:
-            if (stack_size < 1)
+            struct Operation *op = Array_get(&exp->operations, j);
+            _Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
+            switch (op->type)
             {
-                fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
-                        op.loc.filename, op.loc.line, op.loc.collumn);
-                goto compile_program_exit;
+            case PRINT:
+                if (stack_size < 1)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    goto compile_program_exit;
+                }
+                stack_size--;
+                fprintf(output, "    printf(\"%%d\\n\", stack_%03d);\n", stack_size);
+                break;
+            case PLUS:
+                if (stack_size < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    goto compile_program_exit;
+                }
+                stack_size--;
+                fprintf(output, "    stack_%03d = stack_%03d + stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                break;
+            case VALUE:
+                fprintf(output, "    %sstack_%03d = %d;\n",
+                        (stack_size == maximum_stack_size) ? "int " : "",
+                        stack_size, op->value);
+                stack_size++;
+                break;
             }
-            stack_size--;
-            fprintf(output, "    printf(\"%%d\\n\", stack_%03d);\n", stack_size);
-            break;
-        case PLUS:
-            if (stack_size < 2)
-            {
-                fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
-                        op.loc.filename, op.loc.line, op.loc.collumn);
-                goto compile_program_exit;
-            }
-            stack_size--;
-            fprintf(output, "    stack_%03d = stack_%03d + stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
-            break;
-        case VALUE:
-            fprintf(output, "    %sstack_%03d = %d;\n",
-                    (stack_size == maximum_stack_size) ? "int " : "",
-                    stack_size, op.value);
-            stack_size++;
-            break;
+            if (stack_size > maximum_stack_size)
+                maximum_stack_size = stack_size;
         }
-        if (stack_size > maximum_stack_size)
-            maximum_stack_size = stack_size;
     }
     fprintf(output, "    return 0;\n");
     fprintf(output, "}\n");
@@ -269,6 +322,21 @@ void print_usage(void)
     printf("    Subcommands:\n");
     printf("        sim          : Simulate the program\n");
     printf("        com          : Compile the program\n");
+}
+
+void print_program(struct Array *program)
+{
+    for (int j = 0; j < program->length; j++)
+    {
+        struct Expression *exp = Array_get(program, j);
+        printf("out:%d\t", exp->nr_outputs);
+        for (int i = 0; i < exp->operations.length; i++)
+        {
+            struct Operation *op = Array_get(&exp->operations, i);
+            printf("%s ", op->token);
+        }
+        printf("\n");
+    }
 }
 
 int main(int argc, char *argv[])
@@ -285,24 +353,38 @@ int main(int argc, char *argv[])
     {
         fprintf(stderr, "ERROR: No filename given.\n");
     }
-    struct OperationArray operations;
-    OperationArray_init(&operations);
+
+    struct Array operations;
+    Array_init(&operations, sizeof(struct Operation));
+
     parse_file(&operations, argv[2]);
-    reverse_expression_order(&operations);
+
+    struct Array program;
+    Array_init(&program, sizeof(struct Expression));
+
+    parse_program(&program, &operations);
 
     if (strcmp(subcommand, "sim") == 0)
     {
-        simulate_program(&operations);
+        simulate_program(&program);
     }
     else if (strcmp(subcommand, "com") == 0)
     {
-        compile_program(&operations);
+        compile_program(&program);
     }
     else
     {
         fprintf(stderr, "ERROR: Unknown subcommand %s.\n", subcommand);
         print_usage();
     }
-    OperationArray_free(&operations);
+
+    // print_program(&program);
+    for (int i = 0; i < program.length; i++)
+    {
+        struct Expression *exp = Array_get(&program, i);
+        Expression_free(exp);
+    }
+    Array_free(&program);
+    Array_free(&operations);
     return 0;
 }
