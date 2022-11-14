@@ -7,6 +7,7 @@ enum Statement_type
 {
     STATEMENT_TYPE_EXP,
     STATEMENT_TYPE_IF,
+    STATEMENT_TYPE_VAR,
     STATEMENT_TYPE_COUNT,
 };
 
@@ -21,6 +22,11 @@ struct Statement
             struct Expression condition;
             struct Expression action;
         } iff;
+        struct
+        {
+            struct Operation identifier;
+            struct Expression assignment;
+        } var;
     };
 };
 
@@ -34,6 +40,10 @@ void Statement_free(struct Statement *statement)
     case STATEMENT_TYPE_IF:
         Expression_free(&statement->iff.condition);
         Expression_free(&statement->iff.action);
+        break;
+    case STATEMENT_TYPE_VAR:
+        Operation_free(&statement->var.identifier);
+        Expression_free(&statement->var.assignment);
         break;
     default:
         fprintf(stderr, "Unhandle statement type '%d' in 'Statement_free'.\n", statement->type);

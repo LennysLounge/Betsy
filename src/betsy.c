@@ -99,7 +99,7 @@ void parse_file(struct Array *operations, char *filename)
         if (token == NULL)
         {
             fprintf(stderr, "ERROR: Allocation error in %s:%d\n", __FILE__, __LINE__);
-            exit(0);
+            exit(1);
         }
         strncpy(token, file_text + iter.start, iter.length);
         token[iter.length] = 0;
@@ -114,23 +114,27 @@ void parse_file(struct Array *operations, char *filename)
         struct Operation op;
         int value;
         assert(INTRINSIC_TYPE_COUNT == 2 && "Exhaustive handling of intrinsic types");
-        assert(KEYWORD_TYPE_COUNT == 1 && "Exhaustive handling of keyword types");
+        assert(KEYWORD_TYPE_COUNT == 2 && "Exhaustive handling of keyword types");
+        // INTRINSICS
         if (strcmp(token, "print") == 0)
-            op = OP_PRINT;
+            op = OP_INTRINSIC_PRINT;
         else if (strcmp(token, "+") == 0)
-            op = OP_PLUS;
+            op = OP_INTRINSIC_PLUS;
+        // KEYWORDS
         else if (strcmp(token, "if") == 0)
-            op = KEYWORD_IF;
+            op = OP_KEYWORD_IF;
+        else if (strcmp(token, "var") == 0)
+            op = OP_KEYWORD_VAR;
+        // VALUES
         else if (sntoi(token, &value))
         {
-            op = VALUE_INT;
+            op = OP_VALUE_INT;
             op.value.value = value;
         }
         else
         {
-            fprintf(stderr, "%s:%d:%d ERROR: '%s' is not a valid word.",
-                    loc.filename, loc.line, loc.collumn, token);
-            exit(1);
+            op = OP_IDENTIFIER;
+            op.identifier.word = op.token;
         }
 
         // Assign token and location to op.
@@ -138,6 +142,7 @@ void parse_file(struct Array *operations, char *filename)
         op.token = token;
         Array_add(operations, &op);
     }
+
     free(file_text);
 }
 
@@ -147,7 +152,20 @@ struct Tuple
     int required_size;
 };
 
-struct Expression parse_expression(struct Iterator *operations_iter)
+struct Operation *get_identifier(struct Array *array, char *name)
+{
+    for (int i = 0; i < array->length; i++)
+    {
+        struct Operation *op = Array_get(array, i);
+        if (strcmp(op->token, name) == 0)
+        {
+            return op;
+        }
+    }
+    return NULL;
+}
+
+struct Expression parse_expression(struct Iterator *operations_iter, struct Array *identifiers)
 {
     if (!Iterator_hasNext(operations_iter))
     {
@@ -168,13 +186,13 @@ struct Expression parse_expression(struct Iterator *operations_iter)
         int i = operations_iter->index;
         struct Operation *op = (struct Operation *)Iterator_next(operations_iter);
 
-        if (op->type == VALUE)
+        switch (op->type)
         {
+        case VALUE:
             values_available++;
             Array_add(&exp.operations, op);
-        }
-        else if (op->type == INTRINSIC)
-        {
+            break;
+        case INTRINSIC:
             if (op->intrinsic.nr_inputs == 0)
             {
                 values_available += op->intrinsic.nr_outputs;
@@ -185,13 +203,22 @@ struct Expression parse_expression(struct Iterator *operations_iter)
                 struct Tuple t = {i, values_available + op->intrinsic.nr_inputs};
                 Array_add(&stack, &t);
             }
-        }
-        else
-        {
+            break;
+        case IDENTIFIER:
+            struct Operation *id_op = get_identifier(identifiers, op->token);
+            if (id_op == NULL)
+            {
+                fprintf(stderr, "%s:%d:%d ERROR: Unknown identifier '%s'\n",
+                        op->loc.filename, op->loc.line, op->loc.collumn, op->token);
+                exit(1);
+            }
+            values_available++;
+            Array_add(&exp.operations, op);
+            break;
+        default:
             fprintf(stderr, "%s:%d:%d ERROR: The word '%s' is not a valid operation in an expression. Only intrinsics and values are allowed in expressions for now.\n",
                     op->loc.filename, op->loc.line, op->loc.collumn, op->token);
             exit(1);
-            break;
         }
         if (stack.length == 0)
         {
@@ -236,44 +263,99 @@ expression_finished:
 
 void parse_program(struct Array *program, struct Array *operations)
 {
+    struct Array identifiers;
+    Array_init(&identifiers, sizeof(struct Operation));
+
     struct Iterator iter_ops = Iterator_create(operations);
     while (Iterator_hasNext(&iter_ops))
     {
         struct Operation *op = Iterator_peekNext(&iter_ops);
-        assert(OPERATION_TYPE_COUNT == 3 && "Exhaustive handling of Operation types.");
-        if (op->type == KEYWORD)
+        assert(OPERATION_TYPE_COUNT == 4 && "Exhaustive handling of Operation types");
+        struct Statement statement = {0};
+        switch (op->type)
         {
-            assert(KEYWORD_TYPE_COUNT == 1 && "Exhaustive handling of Keywords");
+        case KEYWORD:
+            assert(KEYWORD_TYPE_COUNT == 2 && "Exhaustive handling of Keywords");
             switch (op->keyword.type)
             {
             case KEYWORD_TYPE_IF:
                 Iterator_next(&iter_ops);
 
-                struct Statement statement;
                 statement.type = STATEMENT_TYPE_IF;
-                statement.iff.condition = parse_expression(&iter_ops);
-                statement.iff.action = parse_expression(&iter_ops);
-                Array_add(program, &statement);
+                statement.iff.condition = parse_expression(&iter_ops, &identifiers);
+                statement.iff.action = parse_expression(&iter_ops, &identifiers);
+
+                break;
+            case KEYWORD_TYPE_VAR:
+                Iterator_next(&iter_ops);
+
+                if (!Iterator_hasNext(&iter_ops))
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Unexpected end of file.",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+
+                statement.type = STATEMENT_TYPE_VAR;
+                statement.var.identifier = *((struct Operation *)Iterator_next(&iter_ops));
+                statement.var.assignment = parse_expression(&iter_ops, &identifiers);
+
+                struct Operation *id_op = get_identifier(&identifiers, statement.var.identifier.token);
+                if (id_op != NULL)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Redefinition of variable '%s'.\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn, statement.var.identifier.token);
+                    fprintf(stderr, "%s:%d:%d NOTE:  The original variable was defined in %s:%d:%d\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn,
+                            id_op->loc.filename, id_op->loc.line, id_op->loc.collumn);
+                    exit(1);
+                }
+
+                Array_add(&identifiers, &statement.var.identifier);
 
                 break;
             default:
                 fprintf(stderr, "Unhandled keyword type '%d' in 'prase_program'\n", op->keyword.type);
                 exit(1);
             }
-        }
-        else
-        {
-            struct Statement statement;
+            break;
+        case IDENTIFIER:
+            fprintf(stderr, "ERROR: We do not support calling variables like functions.\n");
+            exit(1);
+            break;
+        default:
+            // naked expression as statement
             statement.type = STATEMENT_TYPE_EXP;
-            statement.expression = parse_expression(&iter_ops);
-            Array_add(program, &statement);
+            statement.expression = parse_expression(&iter_ops, &identifiers);
+            break;
         }
+        Array_add(program, &statement);
     }
+    Array_free(&identifiers);
 }
 
-void simulate_expression(struct Expression exp, struct Array *outputs)
+struct IdentifierElement
 {
-    Array_init(outputs, sizeof(size_t));
+    struct Operation *identifier;
+    size_t value;
+};
+
+struct IdentifierElement *get_identifier_element(struct Array *identifiers, char *id)
+{
+    for (int i = 0; i < identifiers->length; i++)
+    {
+        struct IdentifierElement *element = Array_get(identifiers, i);
+        if (strcmp(element->identifier->token, id) == 0)
+        {
+            return element;
+        }
+    }
+    return NULL;
+}
+
+void simulate_expression(struct Expression exp, struct Array *outputs, struct Array *identifiers)
+{
+    outputs->length = 0;
 
     for (int j = 0; j < exp.operations.length; j++)
     {
@@ -312,6 +394,20 @@ void simulate_expression(struct Expression exp, struct Array *outputs)
         case VALUE:
             Array_add(outputs, &op->value.value);
             break;
+        case IDENTIFIER:
+            struct IdentifierElement *id_elem = get_identifier_element(identifiers, op->token);
+            if (id_elem == NULL)
+            {
+                fprintf(stderr, "%s:%d:%d ERROR: Unknown identifier '%s'\n",
+                        op->loc.filename, op->loc.line, op->loc.collumn, op->token);
+                exit(1);
+            }
+            Array_add(outputs, &id_elem->value);
+            break;
+        default:
+            fprintf(stderr, "ERROR: Operation of type '%d' not implemented yet in 'simulate_expression'",
+                    op->type);
+            exit(1);
         }
     }
 }
@@ -321,16 +417,20 @@ void simulate_program(struct Array *program)
     struct Array exp_output;
     Array_init(&exp_output, sizeof(size_t));
 
+    struct Array identifiers;
+    Array_init(&identifiers, sizeof(struct IdentifierElement));
+
     for (int i = 0; i < program->length; i++)
     {
         struct Statement *statement = Array_get(program, i);
-        if (statement->type == STATEMENT_TYPE_EXP)
+        switch (statement->type)
         {
-            simulate_expression(statement->expression, &exp_output);
-        }
-        else if (statement->type == STATEMENT_TYPE_IF)
-        {
-            simulate_expression(statement->iff.condition, &exp_output);
+        case STATEMENT_TYPE_EXP:
+            simulate_expression(statement->expression, &exp_output, &identifiers);
+            break;
+
+        case STATEMENT_TYPE_IF:
+            simulate_expression(statement->iff.condition, &exp_output, &identifiers);
             if (exp_output.length != 1)
             {
                 struct Operation *op = Array_top(&statement->iff.condition.operations);
@@ -341,15 +441,51 @@ void simulate_program(struct Array *program)
             size_t result = *((size_t *)Array_get(&exp_output, 0));
             if (result == 0)
             {
-                simulate_expression(statement->iff.action, &exp_output);
+                simulate_expression(statement->iff.action, &exp_output, &identifiers);
             }
-        }
-        else
-        {
+            break;
+        case STATEMENT_TYPE_VAR:
+            struct IdentifierElement *prev_id = get_identifier_element(&identifiers, statement->var.identifier.token);
+            if (prev_id != NULL)
+            {
+                struct Operation op = statement->var.identifier;
+                fprintf(stderr, "%s:%d:%d ERROR: Redefinition of identifier '%s'.\n",
+                        op.loc.filename, op.loc.line, op.loc.collumn, op.token);
+                struct Operation *og_op = prev_id->identifier;
+                fprintf(stderr, "%s:%d:%d NOTE:  Original definition was in %s:%d:%d.\n",
+                        op.loc.filename, op.loc.line, op.loc.collumn,
+                        og_op->loc.filename, og_op->loc.line, og_op->loc.collumn);
+                exit(1);
+            }
+            // add identifier
+            struct IdentifierElement id;
+            id.identifier = &statement->var.identifier;
+            simulate_expression(statement->var.assignment, &exp_output, &identifiers);
+            if (exp_output.length != 1)
+            {
+                struct Operation *op = Array_top(&statement->var.assignment.operations);
+                fprintf(stderr, "%s:%d:%d ERROR: Variable assignment must produce exactly one output.\n",
+                        op->loc.filename, op->loc.line, op->loc.collumn);
+                exit(1);
+            }
+            id.value = *((size_t *)Array_get(&exp_output, 0));
+            Array_add(&identifiers, &id);
+            break;
+        default:
+
             fprintf(stderr, "ERROR: Statement type %d not implement yet in 'simulate_program'.\n", statement->type);
             exit(1);
         }
     }
+
+    printf("printing all identifiers:\n");
+    for (int i = 0; i < identifiers.length; i++)
+    {
+        struct IdentifierElement *id = Array_get(&identifiers, i);
+        printf("%10s: %zd\n", id->identifier->token, id->value);
+    }
+    Array_free(&exp_output);
+    Array_free(&identifiers);
 }
 
 void compile_expression(FILE *output, struct Expression exp, int *max_stack_size)
@@ -373,7 +509,7 @@ void compile_expression(FILE *output, struct Expression exp, int *max_stack_size
                     exit(1);
                 }
                 stack_size--;
-                fprintf(output, "    printf(\"%%d\\n\", stack_%03d);\n", stack_size);
+                fprintf(output, "    printf(\"%%zd\\n\", stack_%03d);\n", stack_size);
                 break;
             case PLUS:
                 if (stack_size < 2)
@@ -389,10 +525,20 @@ void compile_expression(FILE *output, struct Expression exp, int *max_stack_size
             break;
         case VALUE:
             fprintf(output, "    %sstack_%03d = %d;\n",
-                    (stack_size == *max_stack_size) ? "int " : "",
+                    (stack_size == *max_stack_size) ? "size_t " : "",
                     stack_size, op->value.value);
             stack_size++;
             break;
+        case IDENTIFIER:
+            fprintf(output, "    %sstack_%03d = %s;\n",
+                    (stack_size == *max_stack_size) ? "size_t " : "",
+                    stack_size, op->token);
+            stack_size++;
+            break;
+        default:
+            fprintf(stderr, "ERROR: Operation type '%d' is not yet implemented in 'compile_expression'.\n",
+                    op->type);
+            exit(1);
         }
         if (stack_size > *max_stack_size)
             *max_stack_size = stack_size;
@@ -429,6 +575,10 @@ void compile_program(struct Array *program)
             fprintf(output, "    {\n");
             compile_expression(output, statement->iff.action, &maximum_stack_size);
             fprintf(output, "    }\n\n");
+            break;
+        case STATEMENT_TYPE_VAR:
+            compile_expression(output, statement->var.assignment, &maximum_stack_size);
+            fprintf(output, "    size_t %s = stack_000;\n", statement->var.identifier.token);
             break;
         default:
             fprintf(stderr, "ERROR: Statement type '%d' not implemented yet in 'compile_program'\n", statement->type);

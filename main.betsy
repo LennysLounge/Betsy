@@ -1,2 +1,6 @@
-if + 0 + 0 1 print 144
-print 12
+var a 12
+var b 144
+var c + a b
+print a
+print b
+print c
