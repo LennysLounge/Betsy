@@ -1,6 +1,4 @@
-var a 12
-var b 144
+var a 35
+var b 34
 var c + a b
-print a
-print b
 print c

@@ -11,6 +11,19 @@
 #include "expression.h"
 #include "statement.h"
 
+#define com_error(location, ...)                                                                 \
+    {                                                                                            \
+        fprintf(stderr, "%s:%d:%d ERROR: ", location.filename, location.line, location.collumn); \
+        fprintf(stderr, __VA_ARGS__);                                                            \
+        exit(1);                                                                                 \
+    }
+#define sim_error(location, ...)                                                                     \
+    {                                                                                                \
+        fprintf(stderr, "%s:%d:%d SIM_ERROR: ", location.filename, location.line, location.collumn); \
+        fprintf(stderr, __VA_ARGS__);                                                                \
+        exit(1);                                                                                     \
+    }
+
 char *read_entire_file(char *filename)
 {
     FILE *input = fopen(filename, "rb");
@@ -170,10 +183,9 @@ struct Expression parse_expression(struct Iterator *operations_iter, struct Arra
     if (!Iterator_hasNext(operations_iter))
     {
         struct Operation *prev_op = Array_get(operations_iter->array, operations_iter->index - 1);
-        fprintf(stderr, "%s:%d:%d ERROR: Expected an expression but got nothing.",
-                prev_op->loc.filename, prev_op->loc.line, prev_op->loc.collumn + (int)strlen(prev_op->token));
-        exit(1);
+        com_error(prev_op->loc, "Expected an expression but got nothing.\n");
     }
+
     struct Expression exp;
     Array_init(&exp.operations, sizeof(struct Operation));
 
@@ -188,11 +200,11 @@ struct Expression parse_expression(struct Iterator *operations_iter, struct Arra
 
         switch (op->type)
         {
-        case VALUE:
+        case OPERATION_TYPE_VALUE:
             values_available++;
             Array_add(&exp.operations, op);
             break;
-        case INTRINSIC:
+        case OPERATION_TYPE_INTRINSIC:
             if (op->intrinsic.nr_inputs == 0)
             {
                 values_available += op->intrinsic.nr_outputs;
@@ -204,21 +216,17 @@ struct Expression parse_expression(struct Iterator *operations_iter, struct Arra
                 Array_add(&stack, &t);
             }
             break;
-        case IDENTIFIER:
+        case OPERATION_TYPE_IDENTIFIER:
             struct Operation *id_op = get_identifier(identifiers, op->token);
             if (id_op == NULL)
-            {
-                fprintf(stderr, "%s:%d:%d ERROR: Unknown identifier '%s'\n",
-                        op->loc.filename, op->loc.line, op->loc.collumn, op->token);
-                exit(1);
-            }
+                com_error(op->loc, "Unkown identifier '%s'.\n", op->token);
+
             values_available++;
             Array_add(&exp.operations, op);
             break;
         default:
-            fprintf(stderr, "%s:%d:%d ERROR: The word '%s' is not a valid operation in an expression. Only intrinsics and values are allowed in expressions for now.\n",
-                    op->loc.filename, op->loc.line, op->loc.collumn, op->token);
-            exit(1);
+            com_error(op->loc, "The word '%s' is not a valid operation in an expression. Only intrinsics, values and identifiers are allowed for now.",
+                      op->token);
         }
         if (stack.length == 0)
         {
@@ -242,18 +250,14 @@ expression_finished:
     {
         struct Tuple *top_tuple = (struct Tuple *)Array_top(&stack);
         struct Operation *op = (struct Operation *)Array_get(operations_iter->array, top_tuple->index);
-        fprintf(stderr, "%s:%d:%d ERROR: Unfinished expression '%s'.\n",
-                op->loc.filename, op->loc.line, op->loc.collumn, op->token);
-        fprintf(stderr, "%s:%d:%d NOTE:  The operation '%s' takes %d input%s ",
-                op->loc.filename, op->loc.line, op->loc.collumn, op->token,
-                op->intrinsic.nr_inputs, op->intrinsic.nr_inputs > 1 ? "s" : "");
         int inputs_provided = op->intrinsic.nr_inputs - top_tuple->required_size + values_available;
-        fprintf(stderr, "but %s%d %s provided.\n",
-                inputs_provided > 0 ? "only " : "",
-                inputs_provided,
-                inputs_provided == 1 ? "was" : "were");
-        // TODO: Maybe we can just log the error and continue.
-        exit(1);
+        com_error(op->loc, "Unfinished expression. '%s' take %d input%s but %s%d %s provided.\n",
+                  op->token,
+                  op->intrinsic.nr_inputs,
+                  op->intrinsic.nr_inputs > 1 ? "s" : "",
+                  inputs_provided > 0 ? "only " : "",
+                  inputs_provided,
+                  inputs_provided == 1 ? "was" : "were");
     }
 
     exp.nr_outputs = values_available;
@@ -274,7 +278,7 @@ void parse_program(struct Array *program, struct Array *operations)
         struct Statement statement = {0};
         switch (op->type)
         {
-        case KEYWORD:
+        case OPERATION_TYPE_KEYWORD:
             assert(KEYWORD_TYPE_COUNT == 2 && "Exhaustive handling of Keywords");
             switch (op->keyword.type)
             {
@@ -290,11 +294,7 @@ void parse_program(struct Array *program, struct Array *operations)
                 Iterator_next(&iter_ops);
 
                 if (!Iterator_hasNext(&iter_ops))
-                {
-                    fprintf(stderr, "%s:%d:%d ERROR: Unexpected end of file.",
-                            op->loc.filename, op->loc.line, op->loc.collumn);
-                    exit(1);
-                }
+                    com_error(op->loc, "Unexpected end of file.\n");
 
                 statement.type = STATEMENT_TYPE_VAR;
                 statement.var.identifier = *((struct Operation *)Iterator_next(&iter_ops));
@@ -302,14 +302,8 @@ void parse_program(struct Array *program, struct Array *operations)
 
                 struct Operation *id_op = get_identifier(&identifiers, statement.var.identifier.token);
                 if (id_op != NULL)
-                {
-                    fprintf(stderr, "%s:%d:%d ERROR: Redefinition of variable '%s'.\n",
-                            op->loc.filename, op->loc.line, op->loc.collumn, statement.var.identifier.token);
-                    fprintf(stderr, "%s:%d:%d NOTE:  The original variable was defined in %s:%d:%d\n",
-                            op->loc.filename, op->loc.line, op->loc.collumn,
-                            id_op->loc.filename, id_op->loc.line, id_op->loc.collumn);
-                    exit(1);
-                }
+                    com_error(op->loc, "Variable '%s' was already defined here: %s:%d:%d.\n.",
+                              statement.var.identifier.token, op->loc.filename, op->loc.line, op->loc.collumn);
 
                 Array_add(&identifiers, &statement.var.identifier);
 
@@ -319,9 +313,8 @@ void parse_program(struct Array *program, struct Array *operations)
                 exit(1);
             }
             break;
-        case IDENTIFIER:
-            fprintf(stderr, "ERROR: We do not support calling variables like functions.\n");
-            exit(1);
+        case OPERATION_TYPE_IDENTIFIER:
+            com_error(op->loc, "We do not support calling variable like functions yet.\n");
             break;
         default:
             // naked expression as statement
@@ -364,26 +357,18 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
         //_Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
         switch (op->type)
         {
-        case INTRINSIC:
+        case OPERATION_TYPE_INTRINSIC:
             switch (op->intrinsic.type)
             {
-            case PRINT:
+            case INTRINSIC_TYPE_PRINT:
                 if (outputs->length < 1)
-                {
-                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
-                            op->loc.filename, op->loc.line, op->loc.collumn);
-                    exit(1);
-                }
+                    sim_error(op->loc, "Not enough values for the print intrinsic.\n");
                 a = *((size_t *)Array_pop(outputs));
                 printf("%zd\n", a);
                 break;
-            case PLUS:
+            case INTRINSIC_TYPE_PLUS:
                 if (outputs->length < 2)
-                {
-                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
-                            op->loc.filename, op->loc.line, op->loc.collumn);
-                    exit(1);
-                }
+                    sim_error(op->loc, "Not enough values for the plus intrinsic.\n");
                 a = *((size_t *)Array_pop(outputs));
                 b = *((size_t *)Array_pop(outputs));
                 b = a + b;
@@ -391,23 +376,18 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
                 break;
             }
             break;
-        case VALUE:
+        case OPERATION_TYPE_VALUE:
             Array_add(outputs, &op->value.value);
             break;
-        case IDENTIFIER:
+        case OPERATION_TYPE_IDENTIFIER:
             struct IdentifierElement *id_elem = get_identifier_element(identifiers, op->token);
             if (id_elem == NULL)
-            {
-                fprintf(stderr, "%s:%d:%d ERROR: Unknown identifier '%s'\n",
-                        op->loc.filename, op->loc.line, op->loc.collumn, op->token);
-                exit(1);
-            }
+                sim_error(op->loc, "Unknwon identifier '%s'.\n", op->token);
             Array_add(outputs, &id_elem->value);
             break;
         default:
-            fprintf(stderr, "ERROR: Operation of type '%d' not implemented yet in 'simulate_expression'",
-                    op->type);
-            exit(1);
+            sim_error(op->loc, "Operation of type '%d' not implemented yet in 'simulate_expression'", op->type);
+            break;
         }
     }
 }
@@ -434,9 +414,7 @@ void simulate_program(struct Array *program)
             if (exp_output.length != 1)
             {
                 struct Operation *op = Array_top(&statement->iff.condition.operations);
-                fprintf(stderr, "%s:%d:%d ERROR: If condition must produce exactly one output.\n",
-                        op->loc.filename, op->loc.line, op->loc.collumn);
-                exit(1);
+                sim_error(op->loc, "If condition must produce exactly one output.\n");
             }
             size_t result = *((size_t *)Array_get(&exp_output, 0));
             if (result == 0)
@@ -447,16 +425,12 @@ void simulate_program(struct Array *program)
         case STATEMENT_TYPE_VAR:
             struct IdentifierElement *prev_id = get_identifier_element(&identifiers, statement->var.identifier.token);
             if (prev_id != NULL)
-            {
-                struct Operation op = statement->var.identifier;
-                fprintf(stderr, "%s:%d:%d ERROR: Redefinition of identifier '%s'.\n",
-                        op.loc.filename, op.loc.line, op.loc.collumn, op.token);
-                struct Operation *og_op = prev_id->identifier;
-                fprintf(stderr, "%s:%d:%d NOTE:  Original definition was in %s:%d:%d.\n",
-                        op.loc.filename, op.loc.line, op.loc.collumn,
-                        og_op->loc.filename, og_op->loc.line, og_op->loc.collumn);
-                exit(1);
-            }
+                sim_error(statement->var.identifier.loc, "Variable '%s' was already defined here: %s:%d:%d.\n.",
+                          statement->var.identifier.token,
+                          prev_id->identifier->loc.filename,
+                          prev_id->identifier->loc.line,
+                          prev_id->identifier->loc.collumn);
+
             // add identifier
             struct IdentifierElement id;
             id.identifier = &statement->var.identifier;
@@ -464,16 +438,13 @@ void simulate_program(struct Array *program)
             if (exp_output.length != 1)
             {
                 struct Operation *op = Array_top(&statement->var.assignment.operations);
-                fprintf(stderr, "%s:%d:%d ERROR: Variable assignment must produce exactly one output.\n",
-                        op->loc.filename, op->loc.line, op->loc.collumn);
-                exit(1);
+                com_error(op->loc, "Variable assignment must produce exactly one output.\n");
             }
             id.value = *((size_t *)Array_get(&exp_output, 0));
             Array_add(&identifiers, &id);
             break;
         default:
-
-            fprintf(stderr, "ERROR: Statement type %d not implement yet in 'simulate_program'.\n", statement->type);
+            fprintf(stderr, "SIM_ERROR: Statement type %d not implement yet in 'simulate_program'.\n", statement->type);
             exit(1);
         }
     }
@@ -498,10 +469,10 @@ void compile_expression(FILE *output, struct Expression exp, int *max_stack_size
         //_Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
         switch (op->type)
         {
-        case INTRINSIC:
+        case OPERATION_TYPE_INTRINSIC:
             switch (op->intrinsic.type)
             {
-            case PRINT:
+            case INTRINSIC_TYPE_PRINT:
                 if (stack_size < 1)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
@@ -511,7 +482,7 @@ void compile_expression(FILE *output, struct Expression exp, int *max_stack_size
                 stack_size--;
                 fprintf(output, "    printf(\"%%zd\\n\", stack_%03d);\n", stack_size);
                 break;
-            case PLUS:
+            case INTRINSIC_TYPE_PLUS:
                 if (stack_size < 2)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
@@ -523,13 +494,13 @@ void compile_expression(FILE *output, struct Expression exp, int *max_stack_size
                 break;
             }
             break;
-        case VALUE:
+        case OPERATION_TYPE_VALUE:
             fprintf(output, "    %sstack_%03d = %d;\n",
                     (stack_size == *max_stack_size) ? "size_t " : "",
                     stack_size, op->value.value);
             stack_size++;
             break;
-        case IDENTIFIER:
+        case OPERATION_TYPE_IDENTIFIER:
             fprintf(output, "    %sstack_%03d = %s;\n",
                     (stack_size == *max_stack_size) ? "size_t " : "",
                     stack_size, op->token);
@@ -567,7 +538,7 @@ void compile_program(struct Array *program)
         case STATEMENT_TYPE_EXP:
             struct Expression exp = statement->expression;
             compile_expression(output, exp, &maximum_stack_size);
-            printf("\n");
+            fprintf(output, "\n");
             break;
         case STATEMENT_TYPE_IF:
             compile_expression(output, statement->iff.condition, &maximum_stack_size);
@@ -579,6 +550,7 @@ void compile_program(struct Array *program)
         case STATEMENT_TYPE_VAR:
             compile_expression(output, statement->var.assignment, &maximum_stack_size);
             fprintf(output, "    size_t %s = stack_000;\n", statement->var.identifier.token);
+            fprintf(output, "\n");
             break;
         default:
             fprintf(stderr, "ERROR: Statement type '%d' not implemented yet in 'compile_program'\n", statement->type);

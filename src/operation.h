@@ -3,19 +3,19 @@
 
 #include <stdlib.h>
 
-enum OperationType
+enum Operation_type
 {
-    KEYWORD,
-    INTRINSIC,
-    VALUE,
-    IDENTIFIER,
+    OPERATION_TYPE_KEYWORD,
+    OPERATION_TYPE_INTRINSIC,
+    OPERATION_TYPE_VALUE,
+    OPERATION_TYPE_IDENTIFIER,
     OPERATION_TYPE_COUNT
 };
 
-enum IntrinsicType
+enum Intrinsic_type
 {
-    PRINT,
-    PLUS,
+    INTRINSIC_TYPE_PRINT,
+    INTRINSIC_TYPE_PLUS,
     INTRINSIC_TYPE_COUNT
 };
 
@@ -37,12 +37,12 @@ struct Operation
 {
     struct Location loc;
     char *token;
-    enum OperationType type;
+    enum Operation_type type;
     union
     {
         struct
         {
-            enum IntrinsicType type;
+            enum Intrinsic_type type;
             int nr_outputs;
             int nr_inputs;
         } intrinsic;
@@ -66,14 +66,14 @@ void Operation_free(struct Operation *op)
     free(op->token);
 }
 
-const struct Operation OP_INTRINSIC_PRINT = {.type = INTRINSIC, .intrinsic.type = PRINT, .intrinsic.nr_inputs = 1, .intrinsic.nr_outputs = 0};
-const struct Operation OP_INTRINSIC_PLUS = {.type = INTRINSIC, .intrinsic.type = PLUS, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
+const struct Operation OP_INTRINSIC_PRINT = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_PRINT, .intrinsic.nr_inputs = 1, .intrinsic.nr_outputs = 0};
+const struct Operation OP_INTRINSIC_PLUS = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_PLUS, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 
-const struct Operation OP_VALUE_INT = {.type = VALUE, .value = 0};
+const struct Operation OP_VALUE_INT = {.type = OPERATION_TYPE_VALUE, .value = 0};
 
-const struct Operation OP_IDENTIFIER = {.type = IDENTIFIER, .identifier.word = NULL};
+const struct Operation OP_IDENTIFIER = {.type = OPERATION_TYPE_IDENTIFIER, .identifier.word = NULL};
 
-const struct Operation OP_KEYWORD_IF = {.type = KEYWORD, .keyword.type = KEYWORD_TYPE_IF};
-const struct Operation OP_KEYWORD_VAR = {.type = KEYWORD, .keyword.type = KEYWORD_TYPE_VAR};
+const struct Operation OP_KEYWORD_IF = {.type = OPERATION_TYPE_KEYWORD, .keyword.type = KEYWORD_TYPE_IF};
+const struct Operation OP_KEYWORD_VAR = {.type = OPERATION_TYPE_KEYWORD, .keyword.type = KEYWORD_TYPE_VAR};
 
 #endif
