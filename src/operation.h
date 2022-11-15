@@ -23,6 +23,8 @@ enum KeywordType
 {
     KEYWORD_TYPE_IF,
     KEYWORD_TYPE_VAR,
+    KEYWORD_TYPE_DO,
+    KEYWORD_TYPE_END,
     KEYWORD_TYPE_COUNT
 };
 
@@ -75,5 +77,7 @@ const struct Operation OP_IDENTIFIER = {.type = OPERATION_TYPE_IDENTIFIER, .iden
 
 const struct Operation OP_KEYWORD_IF = {.type = OPERATION_TYPE_KEYWORD, .keyword.type = KEYWORD_TYPE_IF};
 const struct Operation OP_KEYWORD_VAR = {.type = OPERATION_TYPE_KEYWORD, .keyword.type = KEYWORD_TYPE_VAR};
+const struct Operation OP_KEYWORD_DO = {.type = OPERATION_TYPE_KEYWORD, .keyword.type = KEYWORD_TYPE_DO};
+const struct Operation OP_KEYWORD_END = {.type = OPERATION_TYPE_KEYWORD, .keyword.type = KEYWORD_TYPE_END};
 
 #endif

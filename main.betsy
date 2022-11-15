@@ -1,4 +1,12 @@
-var a 35
-var b 34
-var c + a b
-print c
+var a 12
+do
+    print a
+    var b + 500 a
+end
+var b + + 144 1 1
+if b print b
+print a
+print b
+
+
+
