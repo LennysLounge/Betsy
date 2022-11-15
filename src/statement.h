@@ -21,7 +21,7 @@ struct Statement
         struct
         {
             struct Expression condition;
-            struct Expression action;
+            struct Statement *action;
         } iff;
         struct
         {
@@ -44,7 +44,7 @@ void Statement_free(struct Statement *statement)
         break;
     case STATEMENT_TYPE_IF:
         Expression_free(&statement->iff.condition);
-        Expression_free(&statement->iff.action);
+        Statement_free(statement->iff.action);
         break;
     case STATEMENT_TYPE_VAR:
         Operation_free(&statement->var.identifier);

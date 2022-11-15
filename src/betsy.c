@@ -285,10 +285,16 @@ void parse_statement(struct Statement *statement, struct Iterator *iter_ops, str
         {
         case KEYWORD_TYPE_IF:
             Iterator_next(iter_ops);
-
             statement->type = STATEMENT_TYPE_IF;
             statement->iff.condition = parse_expression(iter_ops, identifiers);
-            statement->iff.action = parse_expression(iter_ops, identifiers);
+            struct Operation *if_op = Iterator_peekNext(iter_ops);
+            if (if_op == NULL)
+                com_error(op->loc, "Unexpected end of file.\n");
+            if (if_op->type != OPERATION_TYPE_KEYWORD || if_op->keyword.type != KEYWORD_TYPE_DO)
+                com_error(if_op->loc, "Unexpected word '%s' after if condition. Expected the start of a block.\n",
+                          if_op->token);
+            statement->iff.action = malloc(sizeof(struct Statement));
+            parse_statement(statement->iff.action, iter_ops, identifiers);
 
             break;
         case KEYWORD_TYPE_VAR:
@@ -453,7 +459,7 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
         size_t result = *((size_t *)Array_get(&exp_output, 0));
         if (result == 0)
         {
-            simulate_expression(statement->iff.action, &exp_output, identifiers);
+            simulate_statement(statement->iff.action, identifiers);
         }
         break;
     case STATEMENT_TYPE_VAR:
@@ -581,9 +587,7 @@ void compile_statement(FILE *output, int indent, struct Statement *statement, in
     case STATEMENT_TYPE_IF:
         compile_expression(output, indent, statement->iff.condition, max_stack_size);
         fprintf_i(output, indent, "if (stack_000 == 0)\n");
-        fprintf_i(output, indent, "{\n");
-        compile_expression(output, indent + 1, statement->iff.action, max_stack_size);
-        fprintf_i(output, indent, "}\n");
+        compile_statement(output, indent, statement->iff.action, max_stack_size);
         break;
     case STATEMENT_TYPE_VAR:
         compile_expression(output, indent, statement->var.assignment, max_stack_size);
@@ -652,21 +656,6 @@ void print_program(struct Array *program)
             for (int i = 0; i < statement->expression.operations.length; i++)
             {
                 struct Operation *op = Array_get(&statement->expression.operations, i);
-                printf("%s ", op->token);
-            }
-            printf("\n");
-            break;
-        case STATEMENT_TYPE_IF:
-            printf("condition: ");
-            for (int i = 0; i < statement->iff.condition.operations.length; i++)
-            {
-                struct Operation *op = Array_get(&statement->iff.condition.operations, i);
-                printf("%s ", op->token);
-            }
-            printf("\t action: ");
-            for (int i = 0; i < statement->iff.action.operations.length; i++)
-            {
-                struct Operation *op = Array_get(&statement->iff.action.operations, i);
                 printf("%s ", op->token);
             }
             printf("\n");
