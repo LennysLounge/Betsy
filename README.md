@@ -7,6 +7,7 @@ I do not know what i am doing, but that is the fun in it.
 ### Goals:
 - [X] Written in c.
 - [X] Compiles to c.
+- [ ] Turing complete.
 - [ ] Staticly and strongly typed.
 - [ ] Compiles to c, and then to a native executable automatically.
 - [ ] Support for first class functions.
