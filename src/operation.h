@@ -18,6 +18,8 @@ enum Intrinsic_type
     INTRINSIC_TYPE_PLUS,
     INTRINSIC_TYPE_MINUS,
     INTRINSIC_TYPE_GT,
+    INTRINSIC_TYPE_MODULO,
+    INTRINSIC_TYPE_EQUAL,
     INTRINSIC_TYPE_COUNT
 };
 
@@ -76,6 +78,8 @@ const struct Operation OP_INTRINSIC_PRINT = {.type = OPERATION_TYPE_INTRINSIC, .
 const struct Operation OP_INTRINSIC_PLUS = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_PLUS, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 const struct Operation OP_INTRINSIC_MINUS = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_MINUS, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 const struct Operation OP_INTRINSIC_GT = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_GT, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
+const struct Operation OP_INTRINSIC_MODULO = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_MODULO, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
+const struct Operation OP_INTRINSIC_EQUAL = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_EQUAL, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 
 const struct Operation OP_VALUE_INT = {.type = OPERATION_TYPE_VALUE, .value = 0};
 

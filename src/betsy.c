@@ -130,7 +130,7 @@ void parse_file(struct Array *operations, char *filename)
         // Create operation
         struct Operation op;
         int value;
-        _Static_assert(INTRINSIC_TYPE_COUNT == 4, "Exhaustive handling of intrinsic types");
+        _Static_assert(INTRINSIC_TYPE_COUNT == 6, "Exhaustive handling of intrinsic types");
         _Static_assert(KEYWORD_TYPE_COUNT == 6, "Exhaustive handling of keyword types");
         // INTRINSICS
         if (strcmp(token, "print") == 0)
@@ -141,6 +141,10 @@ void parse_file(struct Array *operations, char *filename)
             op = OP_INTRINSIC_MINUS;
         else if (strcmp(token, ">") == 0)
             op = OP_INTRINSIC_GT;
+        else if (strcmp(token, "%") == 0)
+            op = OP_INTRINSIC_MODULO;
+        else if (strcmp(token, "=") == 0)
+            op = OP_INTRINSIC_EQUAL;
         // KEYWORDS
         else if (strcmp(token, "if") == 0)
             op = OP_KEYWORD_IF;
@@ -474,6 +478,22 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
                 l = l > r;
                 Array_add(outputs, &l);
                 break;
+            case INTRINSIC_TYPE_MODULO:
+                if (outputs->length < 2)
+                    sim_error(op->loc, "Not enough values for the modulo intrinsic.\n");
+                r = *((size_t *)Array_pop(outputs));
+                l = *((size_t *)Array_pop(outputs));
+                l = l % r;
+                Array_add(outputs, &l);
+                break;
+            case INTRINSIC_TYPE_EQUAL:
+                if (outputs->length < 2)
+                    sim_error(op->loc, "Not enough values for the equal intrinsic.\n");
+                r = *((size_t *)Array_pop(outputs));
+                l = *((size_t *)Array_pop(outputs));
+                l = l == r;
+                Array_add(outputs, &l);
+                break;
             default:
                 sim_error(op->loc, "Intrinsic of type '%d' not implemented yet in 'simulate_expression'", op->intrinsic.type);
                 break;
@@ -514,7 +534,7 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
             sim_error(op->loc, "If condition must produce exactly one output.\n");
         }
         size_t result = *((size_t *)Array_get(&exp_output, 0));
-        if (result == 0)
+        if (result != 0)
         {
             simulate_statement(statement->iff.action, identifiers);
         }
@@ -648,6 +668,26 @@ void compile_expression(FILE *output, int indent, struct Expression exp, int *ma
                 }
                 stack_size--;
                 fprintf_i(output, indent, "stack_%03d = stack_%03d > stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                break;
+            case INTRINSIC_TYPE_MODULO:
+                if (stack_size < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the modulo intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+                stack_size--;
+                fprintf_i(output, indent, "stack_%03d = stack_%03d %% stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                break;
+            case INTRINSIC_TYPE_EQUAL:
+                if (stack_size < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the equal intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+                stack_size--;
+                fprintf_i(output, indent, "stack_%03d = stack_%03d == stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
                 break;
             default:
                 fprintf(stderr, "ERROR: Intrinsic of type '%d' is not yet implemented in 'compile_expression'.\n",
