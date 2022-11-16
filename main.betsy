@@ -1,18 +1,5 @@
-var a 12
-do
-    print a
-    var b + 500 a
+var i 0
+while > 10 i do
+    print i
+    set i + i 1
 end
-
-var b + + 144 1 1
-if 0 do 
-    print b
-    print 1
-    print 2 
-    print 3
-    print 4
-end
-print a
-print b
-
-

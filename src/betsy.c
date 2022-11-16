@@ -130,13 +130,17 @@ void parse_file(struct Array *operations, char *filename)
         // Create operation
         struct Operation op;
         int value;
-        assert(INTRINSIC_TYPE_COUNT == 2 && "Exhaustive handling of intrinsic types");
-        assert(KEYWORD_TYPE_COUNT == 4 && "Exhaustive handling of keyword types");
+        _Static_assert(INTRINSIC_TYPE_COUNT == 4, "Exhaustive handling of intrinsic types");
+        _Static_assert(KEYWORD_TYPE_COUNT == 6, "Exhaustive handling of keyword types");
         // INTRINSICS
         if (strcmp(token, "print") == 0)
             op = OP_INTRINSIC_PRINT;
         else if (strcmp(token, "+") == 0)
             op = OP_INTRINSIC_PLUS;
+        else if (strcmp(token, "-") == 0)
+            op = OP_INTRINSIC_MINUS;
+        else if (strcmp(token, ">") == 0)
+            op = OP_INTRINSIC_GT;
         // KEYWORDS
         else if (strcmp(token, "if") == 0)
             op = OP_KEYWORD_IF;
@@ -146,6 +150,10 @@ void parse_file(struct Array *operations, char *filename)
             op = OP_KEYWORD_DO;
         else if (strcmp(token, "end") == 0)
             op = OP_KEYWORD_END;
+        else if (strcmp(token, "set") == 0)
+            op = OP_KEYWORD_SET;
+        else if (strcmp(token, "while") == 0)
+            op = OP_KEYWORD_WHILE;
         // VALUES
         else if (sntoi(token, &value))
         {
@@ -276,11 +284,11 @@ expression_finished:
 void parse_statement(struct Statement *statement, struct Iterator *iter_ops, struct Array *identifiers)
 {
     struct Operation *op = Iterator_peekNext(iter_ops);
-    assert(OPERATION_TYPE_COUNT == 4 && "Exhaustive handling of Operation types");
+    _Static_assert(OPERATION_TYPE_COUNT == 4, "Exhaustive handling of Operation types");
     switch (op->type)
     {
     case OPERATION_TYPE_KEYWORD:
-        assert(KEYWORD_TYPE_COUNT == 4 && "Exhaustive handling of Keywords");
+        _Static_assert(KEYWORD_TYPE_COUNT == 6, "Exhaustive handling of Keywords");
         switch (op->keyword.type)
         {
         case KEYWORD_TYPE_IF:
@@ -297,6 +305,19 @@ void parse_statement(struct Statement *statement, struct Iterator *iter_ops, str
             parse_statement(statement->iff.action, iter_ops, identifiers);
 
             break;
+        case KEYWORD_TYPE_WHILE:
+            Iterator_next(iter_ops);
+            statement->type = STATEMENT_TYPE_WHILE;
+            statement->whilee.condition = parse_expression(iter_ops, identifiers);
+            struct Operation *while_op = Iterator_peekNext(iter_ops);
+            if (while_op == NULL)
+                com_error(op->loc, "Unexpected end of file.\n");
+            if (while_op->type != OPERATION_TYPE_KEYWORD || while_op->keyword.type != KEYWORD_TYPE_DO)
+                com_error(while_op->loc, "Unexpected word '%s' after while condition. Expected the start of a block.\n",
+                          while_op->token);
+            statement->whilee.action = malloc(sizeof(struct Statement));
+            parse_statement(statement->whilee.action, iter_ops, identifiers);
+            break;
         case KEYWORD_TYPE_VAR:
             Iterator_next(iter_ops);
 
@@ -307,19 +328,34 @@ void parse_statement(struct Statement *statement, struct Iterator *iter_ops, str
             statement->var.identifier = *((struct Operation *)Iterator_next(iter_ops));
             statement->var.assignment = parse_expression(iter_ops, identifiers);
 
-            struct Operation *id_op = get_identifier(identifiers, statement->var.identifier.token);
-            if (id_op != NULL)
+            struct Operation *var_op = get_identifier(identifiers, statement->var.identifier.token);
+            if (var_op != NULL)
                 com_error(op->loc, "Variable '%s' was already defined here: %s:%d:%d.\n.",
                           statement->var.identifier.token, op->loc.filename, op->loc.line, op->loc.collumn);
 
             Array_add(identifiers, &statement->var.identifier);
 
             break;
+        case KEYWORD_TYPE_SET:
+            Iterator_next(iter_ops);
+
+            if (!Iterator_hasNext(iter_ops))
+                com_error(op->loc, "Unexpected end of file.\n");
+
+            statement->type = STATEMENT_TYPE_SET;
+            statement->set.identifier = *((struct Operation *)Iterator_next(iter_ops));
+            statement->set.assignment = parse_expression(iter_ops, identifiers);
+
+            struct Operation *set_op = get_identifier(identifiers, statement->set.identifier.token);
+            if (set_op == NULL)
+                com_error(op->loc, "Undefined variable '%s'.\n.", statement->set.identifier.token);
+
+            break;
         case KEYWORD_TYPE_DO:
             Iterator_next(iter_ops);
             int identifier_stack_length = identifiers->length;
 
-            statement->type = STATEMENT_TYPE_BLOCk;
+            statement->type = STATEMENT_TYPE_BLOCK;
             Array_init(&statement->block.statements, sizeof(struct Statement));
 
             struct Operation *block_op = Iterator_peekNext(iter_ops);
@@ -342,13 +378,15 @@ void parse_statement(struct Statement *statement, struct Iterator *iter_ops, str
             Iterator_next(iter_ops);
             com_error(op->loc, "Encountered 'end' without a matching 'do'.\n");
             break;
+
         default:
             fprintf(stderr, "Unhandled keyword type '%d' in 'prase_program'\n", op->keyword.type);
             exit(1);
         }
         break;
     case OPERATION_TYPE_IDENTIFIER:
-        com_error(op->loc, "We do not support calling variable like functions yet.\n");
+        com_error(op->loc, "Unknown intrinsic '%s'. We do not support calling variable like functions yet.\n",
+                  op->token);
         break;
     default:
         // naked expression as statement
@@ -399,7 +437,7 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
     for (int j = 0; j < exp.operations.length; j++)
     {
         struct Operation *op = Array_get(&exp.operations, j);
-        size_t a, b;
+        size_t r, l;
         //_Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
         switch (op->type)
         {
@@ -409,16 +447,35 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
             case INTRINSIC_TYPE_PRINT:
                 if (outputs->length < 1)
                     sim_error(op->loc, "Not enough values for the print intrinsic.\n");
-                a = *((size_t *)Array_pop(outputs));
-                printf("%zd\n", a);
+                r = *((size_t *)Array_pop(outputs));
+                printf("%zd\n", r);
                 break;
             case INTRINSIC_TYPE_PLUS:
                 if (outputs->length < 2)
                     sim_error(op->loc, "Not enough values for the plus intrinsic.\n");
-                a = *((size_t *)Array_pop(outputs));
-                b = *((size_t *)Array_pop(outputs));
-                b = a + b;
-                Array_add(outputs, &b);
+                r = *((size_t *)Array_pop(outputs));
+                l = *((size_t *)Array_pop(outputs));
+                l = r + l;
+                Array_add(outputs, &l);
+                break;
+            case INTRINSIC_TYPE_MINUS:
+                if (outputs->length < 2)
+                    sim_error(op->loc, "Not enough values for the minus intrinsic.\n");
+                r = *((size_t *)Array_pop(outputs));
+                l = *((size_t *)Array_pop(outputs));
+                l = l - r;
+                Array_add(outputs, &l);
+                break;
+            case INTRINSIC_TYPE_GT:
+                if (outputs->length < 2)
+                    sim_error(op->loc, "Not enough values for the greater than intrinsic.\n");
+                r = *((size_t *)Array_pop(outputs));
+                l = *((size_t *)Array_pop(outputs));
+                l = l > r;
+                Array_add(outputs, &l);
+                break;
+            default:
+                sim_error(op->loc, "Intrinsic of type '%d' not implemented yet in 'simulate_expression'", op->intrinsic.type);
                 break;
             }
             break;
@@ -462,6 +519,21 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
             simulate_statement(statement->iff.action, identifiers);
         }
         break;
+    case STATEMENT_TYPE_WHILE:
+        while (true)
+        {
+            simulate_expression(statement->whilee.condition, &exp_output, identifiers);
+            if (exp_output.length != 1)
+            {
+                struct Operation *op = Array_top(&statement->whilee.condition.operations);
+                sim_error(op->loc, "While condition must produce exactly one output.\n");
+            }
+            size_t result = *((size_t *)Array_get(&exp_output, 0));
+            if (result == 0)
+                break;
+            simulate_statement(statement->whilee.action, identifiers);
+        }
+        break;
     case STATEMENT_TYPE_VAR:
         struct IdentifierElement *prev_id = get_identifier_element(identifiers, statement->var.identifier.token);
         if (prev_id != NULL)
@@ -478,12 +550,25 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
         if (exp_output.length != 1)
         {
             struct Operation *op = Array_top(&statement->var.assignment.operations);
-            com_error(op->loc, "Variable assignment must produce exactly one output.\n");
+            sim_error(op->loc, "Variable declaration must produce exactly one output.\n");
         }
         id.value = *((size_t *)Array_get(&exp_output, 0));
         Array_add(identifiers, &id);
         break;
-    case STATEMENT_TYPE_BLOCk:
+    case STATEMENT_TYPE_SET:
+        struct IdentifierElement *set_prev_id = get_identifier_element(identifiers, statement->set.identifier.token);
+        if (set_prev_id == NULL)
+            sim_error(statement->var.identifier.loc, "Undefined variable '%s'.\n", statement->var.identifier.token);
+        // evaluate expression
+        simulate_expression(statement->set.assignment, &exp_output, identifiers);
+        if (exp_output.length != 1)
+        {
+            struct Operation *op = Array_top(&statement->var.assignment.operations);
+            sim_error(op->loc, "Variable declaration must produce exactly one output.\n");
+        }
+        set_prev_id->value = *((size_t *)Array_get(&exp_output, 0));
+        break;
+    case STATEMENT_TYPE_BLOCK:
         int identifiers_stack_length = identifiers->length;
         for (int i = 0; i < statement->block.statements.length; i++)
         {
@@ -493,7 +578,7 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
         identifiers->length = identifiers_stack_length;
         break;
     default:
-        fprintf(stderr, "SIM_ERROR: Statement type %d not implement yet in 'simulate_program'.\n", statement->type);
+        fprintf(stderr, "SIM_ERROR: Statement type %d not implement yet in 'simulate_statement'.\n", statement->type);
         exit(1);
     }
     Array_free(&exp_output);
@@ -509,14 +594,6 @@ void simulate_program(struct Array *program)
         struct Statement *statement = Array_get(program, i);
         simulate_statement(statement, &identifiers);
     }
-
-    printf("printing all identifiers:\n");
-    for (int i = 0; i < identifiers.length; i++)
-    {
-        struct IdentifierElement *id = Array_get(&identifiers, i);
-        printf("%10s: %zd\n", id->identifier->token, id->value);
-    }
-    Array_free(&identifiers);
 }
 
 void compile_expression(FILE *output, int indent, struct Expression exp, int *max_stack_size)
@@ -552,6 +629,31 @@ void compile_expression(FILE *output, int indent, struct Expression exp, int *ma
                 stack_size--;
                 fprintf_i(output, indent, "stack_%03d = stack_%03d + stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
                 break;
+            case INTRINSIC_TYPE_MINUS:
+                if (stack_size < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the minus intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+                stack_size--;
+                fprintf_i(output, indent, "stack_%03d = stack_%03d - stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                break;
+            case INTRINSIC_TYPE_GT:
+                if (stack_size < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the greater than intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+                stack_size--;
+                fprintf_i(output, indent, "stack_%03d = stack_%03d > stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                break;
+            default:
+                fprintf(stderr, "ERROR: Intrinsic of type '%d' is not yet implemented in 'compile_expression'.\n",
+                        op->intrinsic.type);
+                exit(1);
+                break;
             }
             break;
         case OPERATION_TYPE_VALUE:
@@ -586,14 +688,27 @@ void compile_statement(FILE *output, int indent, struct Statement *statement, in
         break;
     case STATEMENT_TYPE_IF:
         compile_expression(output, indent, statement->iff.condition, max_stack_size);
-        fprintf_i(output, indent, "if (stack_000 == 0)\n");
+        fprintf_i(output, indent, "if (stack_000 != 0)\n");
         compile_statement(output, indent, statement->iff.action, max_stack_size);
+        break;
+    case STATEMENT_TYPE_WHILE:
+        fprintf_i(output, indent, "while (1)\n");
+        fprintf_i(output, indent, "{\n");
+        compile_expression(output, indent + 1, statement->whilee.condition, max_stack_size);
+        fprintf_i(output, (indent + 1), "if(stack_000 == 0)\n");
+        fprintf_i(output, (indent + 2), "break;\n");
+        compile_statement(output, indent + 1, statement->whilee.action, max_stack_size);
+        fprintf_i(output, indent, "}\n");
         break;
     case STATEMENT_TYPE_VAR:
         compile_expression(output, indent, statement->var.assignment, max_stack_size);
         fprintf_i(output, indent, "size_t %s = stack_000;\n", statement->var.identifier.token);
         break;
-    case STATEMENT_TYPE_BLOCk:
+    case STATEMENT_TYPE_SET:
+        compile_expression(output, indent, statement->set.assignment, max_stack_size);
+        fprintf_i(output, indent, "%s = stack_000;\n", statement->set.identifier.token);
+        break;
+    case STATEMENT_TYPE_BLOCK:
         fprintf_i(output, indent, "{\n");
         int prev_stack_size = *max_stack_size;
         for (int i = 0; i < statement->block.statements.length; i++)

@@ -7,8 +7,10 @@ enum Statement_type
 {
     STATEMENT_TYPE_EXP,
     STATEMENT_TYPE_IF,
+    STATEMENT_TYPE_WHILE,
     STATEMENT_TYPE_VAR,
-    STATEMENT_TYPE_BLOCk,
+    STATEMENT_TYPE_SET,
+    STATEMENT_TYPE_BLOCK,
     STATEMENT_TYPE_COUNT,
 };
 
@@ -25,9 +27,19 @@ struct Statement
         } iff;
         struct
         {
+            struct Expression condition;
+            struct Statement *action;
+        } whilee;
+        struct
+        {
             struct Operation identifier;
             struct Expression assignment;
         } var;
+        struct
+        {
+            struct Operation identifier;
+            struct Expression assignment;
+        } set;
         struct
         {
             struct Array statements;
@@ -37,6 +49,7 @@ struct Statement
 
 void Statement_free(struct Statement *statement)
 {
+    _Static_assert(STATEMENT_TYPE_COUNT == 6, "Exhaustive handling of statement types");
     switch (statement->type)
     {
     case STATEMENT_TYPE_EXP:
@@ -46,11 +59,19 @@ void Statement_free(struct Statement *statement)
         Expression_free(&statement->iff.condition);
         Statement_free(statement->iff.action);
         break;
+    case STATEMENT_TYPE_WHILE:
+        Expression_free(&statement->whilee.condition);
+        Statement_free(statement->whilee.action);
+        break;
     case STATEMENT_TYPE_VAR:
         Operation_free(&statement->var.identifier);
         Expression_free(&statement->var.assignment);
         break;
-    case STATEMENT_TYPE_BLOCk:
+    case STATEMENT_TYPE_SET:
+        Operation_free(&statement->set.identifier);
+        Expression_free(&statement->set.assignment);
+        break;
+    case STATEMENT_TYPE_BLOCK:
         for (int i = 0; i < statement->block.statements.length; i++)
         {
             Statement_free(Array_get(&statement->block.statements, i));
