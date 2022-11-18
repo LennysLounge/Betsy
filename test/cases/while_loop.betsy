@@ -1,0 +1,5 @@
+var i 10
+while > i 0 do
+    print i
+    set i - i 1
+end

@@ -1,0 +1,7 @@
+print > 100 20
+print > 100 100
+print > 100 120
+
+print = 100 20
+print = 100 100
+print = 100 120

@@ -1,0 +1,15 @@
+if 0 do
+    print 144
+end
+
+if 1 do
+   print 69 
+end
+
+if 2 do
+    print 70 
+end
+
+if 3 do
+    print 71
+end
