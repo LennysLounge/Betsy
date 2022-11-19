@@ -93,20 +93,29 @@ bool find_next_word(char *file_text, struct FileIterator *iter)
     return true;
 }
 
-bool sntoi(char *word, int *out)
+bool tryParseInteger(char *word, int *out)
 {
-    int value = 0;
     int i = 0;
-    while (word[i] != 0)
+    int sign = 1;
+    if (word[0] == '-')
     {
-        if (word[i] < 48 || word[i] > 57)
+        sign = -1;
+        i++;
+    }
+    int value = 0;
+
+    for (; word[i] != 0; i++)
+    {
+        if (word[i] == '_')
+            continue;
+
+        if (word[i] < '0' || word[i] > '9')
         {
             return false;
         }
-        value = value * 10 + (word[i] - 48);
-        i++;
+        value = value * 10 + (word[i] - '0');
     }
-    *out = value;
+    *out = value * sign;
     return true;
 }
 
@@ -165,7 +174,7 @@ void parse_file(struct Array *operations, char *filename)
         else if (strcmp(token, "while") == 0)
             op = OP_KEYWORD_WHILE;
         // VALUES
-        else if (sntoi(token, &value))
+        else if (tryParseInteger(token, &value))
         {
             op = OP_VALUE_INT;
             op.value.value = value;
