@@ -77,7 +77,6 @@ if len(sys.argv) != 3:
     print("Usage: test.py <record|update> <directory to test>")
     exit()
 
-
 if(sys.argv[1] == "record"):
     recordResults = True
 elif(sys.argv[1] == "update"):
