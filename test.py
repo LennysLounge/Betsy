@@ -82,6 +82,8 @@ if(sys.argv[1] == "record"):
     recordResults = True
 elif(sys.argv[1] == "update"):
     updateResults = True
+elif(sys.argv[1] == "test"):
+    pass
 else:
     print("unrecognized command : " + sys.argv[1])
     exit()
