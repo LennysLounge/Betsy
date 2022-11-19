@@ -1,5 +1,5 @@
 var i 0
 while > 10 i do
-    print i
+    print i #comment
     set i + i 1
 end

@@ -2,6 +2,8 @@ import subprocess
 import sys
 import os
 
+betsyPath = "betsy.exe"
+targetDir = "./"
 recordResults = False
 updateResults = False
 testsFailed = 0
@@ -32,7 +34,7 @@ def testResult(filename, data):
             print(data.decode("latin-1"))
 
 def simulateTest(root, file):
-    proc = subprocess.Popen(["../betsy", "sim", root + "/" + file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen([betsyPath, "sim", root + "/" + file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()
 
     resultDir = root + "/results_sim/"
@@ -48,7 +50,7 @@ def simulateTest(root, file):
 
 def compileTest(root, file):
     # Run compiler
-    proc = subprocess.Popen(["../betsy", "com", root + "/" + file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen([betsyPath, "com", root + "/" + file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()
     # Compile program
     proc_cl = subprocess.Popen(["cl", "out.c"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -71,16 +73,22 @@ def compileTest(root, file):
         testResult(resultDir + name + ".stdout", stdout)
         testResult(resultDir + name + ".stderr", stderr)
 
-if len(sys.argv) == 2:
-    if(sys.argv[1] == "record"):
-        recordResults = True
-    elif(sys.argv[1] == "update"):
-        updateResults = True
-    else:
-        print("unrecognized command : " + sys.argv[1])
-        exit()
+if len(sys.argv) != 3:
+    print("Usage: test.py <record|update> <directory to test>")
+    exit()
 
-for root, dirs, files in os.walk("./cases"):
+
+if(sys.argv[1] == "record"):
+    recordResults = True
+elif(sys.argv[1] == "update"):
+    updateResults = True
+else:
+    print("unrecognized command : " + sys.argv[1])
+    exit()
+
+targetDir = sys.argv[2]
+
+for root, dirs, files in os.walk(targetDir):
     for file in files:
         # filter non betsy files
         name, _, extension = file.rpartition(".")
@@ -88,7 +96,13 @@ for root, dirs, files in os.walk("./cases"):
             continue
         print(root + "/" + file)
         simulateTest(root, file)
-        compileTest(root, file)        
+        compileTest(root, file)      
+    if os.path.exists("out.c"):
+        os.remove("out.c")
+    if os.path.exists("out.obj"):
+        os.remove("out.obj")
+    if os.path.exists("out.exe"):
+        os.remove("out.exe")  
 
 if not recordResults and not updateResults:
     print("")

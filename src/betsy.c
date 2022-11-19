@@ -67,6 +67,12 @@ bool find_next_word(char *file_text, struct FileIterator *iter)
         {
             return false;
         }
+        else if (file_text[pos] == '#')
+        {
+            while (file_text[pos] != 0 && file_text[pos] != '\n')
+                pos++;
+            pos--;
+        }
         else if (isgraph(file_text[pos]))
         {
             iter->start = pos;
