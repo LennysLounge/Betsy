@@ -146,7 +146,7 @@ void parse_file(struct Array *operations, char *filename)
         // Create operation
         struct Operation op;
         int32_t value32;
-        _Static_assert(INTRINSIC_TYPE_COUNT == 6, "Exhaustive handling of intrinsic types");
+        _Static_assert(INTRINSIC_TYPE_COUNT == 7, "Exhaustive handling of intrinsic types");
         _Static_assert(KEYWORD_TYPE_COUNT == 6, "Exhaustive handling of keyword types");
         // INTRINSICS
         if (strcmp(token, "print") == 0)
@@ -161,6 +161,8 @@ void parse_file(struct Array *operations, char *filename)
             op = OP_INTRINSIC_MODULO;
         else if (strcmp(token, "=") == 0)
             op = OP_INTRINSIC_EQUAL;
+        else if (strcmp(token, "or") == 0)
+            op = OP_INTRINSIC_OR;
         // KEYWORDS
         else if (strcmp(token, "if") == 0)
             op = OP_KEYWORD_IF;
@@ -223,6 +225,7 @@ void parse_expression(struct Expression *exp, struct Iterator *operations_iter, 
     }
 
     struct Operation *op = Iterator_next(operations_iter);
+    _Static_assert(OPERATION_TYPE_COUNT == 4, "Exhaustive handling of operation types");
     switch (op->type)
     {
     case OPERATION_TYPE_VALUE:
@@ -240,6 +243,7 @@ void parse_expression(struct Expression *exp, struct Iterator *operations_iter, 
         break;
     case OPERATION_TYPE_INTRINSIC:
         int prev_output_count = exp->outputs.length;
+        _Static_assert(INTRINSIC_TYPE_COUNT == 7, "Exhaustive handling of intrinsic types");
         switch (op->intrinsic.type)
         {
         case INTRINSIC_TYPE_PRINT:
@@ -247,9 +251,11 @@ void parse_expression(struct Expression *exp, struct Iterator *operations_iter, 
             if (exp->outputs.length - prev_output_count != 1)
                 com_error(op->loc, "The 'print' intrinsic takes 1 input but %d were provided.\n", exp->outputs.length);
             enum TypeInfo *print_i = Array_pop(&exp->outputs);
-            (void)print_i;
-            // TODO: type check print_i
-            Array_add(&exp->operations, op);
+            if (*print_i == TYPE_INFO_INT || *print_i == TYPE_INFO_BOOL)
+                Array_add(&exp->operations, op);
+            else
+                com_error(op->loc, "Cannot print values of type '%s'.\n", Type_info_name(*print_i));
+
             break;
         case INTRINSIC_TYPE_PLUS:
             parse_expression(exp, operations_iter, identifiers);
@@ -258,11 +264,13 @@ void parse_expression(struct Expression *exp, struct Iterator *operations_iter, 
                 com_error(op->loc, "The 'plus' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
             enum TypeInfo *plus_r = Array_pop(&exp->outputs);
             enum TypeInfo *plus_l = Array_pop(&exp->outputs);
-            (void)plus_r;
-            (void)plus_l;
-            // TODO: type check plus_r, plus_l
-            Array_add(&exp->operations, op);
-            Array_add(&exp->outputs, plus_r);
+            if (*plus_r == TYPE_INFO_INT && *plus_r == *plus_l)
+            {
+                Array_add(&exp->operations, op);
+                Array_add(&exp->outputs, plus_r);
+            }
+            else
+                com_error(op->loc, "Cannot add values of type '%s' and '%s'.\n", Type_info_name(*plus_l), Type_info_name(*plus_r));
             break;
         case INTRINSIC_TYPE_MINUS:
             parse_expression(exp, operations_iter, identifiers);
@@ -271,11 +279,13 @@ void parse_expression(struct Expression *exp, struct Iterator *operations_iter, 
                 com_error(op->loc, "The 'minus' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
             enum TypeInfo *minus_r = Array_pop(&exp->outputs);
             enum TypeInfo *minus_l = Array_pop(&exp->outputs);
-            (void)minus_r;
-            (void)minus_l;
-            // TODO: type check plus_r, plus_l
-            Array_add(&exp->operations, op);
-            Array_add(&exp->outputs, minus_r);
+            if (*minus_r == TYPE_INFO_INT && *minus_r == *minus_l)
+            {
+                Array_add(&exp->operations, op);
+                Array_add(&exp->outputs, minus_r);
+            }
+            else
+                com_error(op->loc, "Cannot subtract values of type '%s' and '%s'.\n", Type_info_name(*minus_l), Type_info_name(*minus_r));
             break;
         case INTRINSIC_TYPE_GT:
             parse_expression(exp, operations_iter, identifiers);
@@ -284,37 +294,61 @@ void parse_expression(struct Expression *exp, struct Iterator *operations_iter, 
                 com_error(op->loc, "The 'greater than' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
             enum TypeInfo *gt_r = Array_pop(&exp->outputs);
             enum TypeInfo *gt_l = Array_pop(&exp->outputs);
-            (void)gt_r;
-            (void)gt_l;
-            // TODO: type check plus_r, plus_l
-            Array_add(&exp->operations, op);
-            Array_add(&exp->outputs, gt_r);
+            if (*gt_r == TYPE_INFO_INT && *gt_r == *gt_l)
+            {
+                Array_add(&exp->operations, op);
+                enum Type_info gt_bool = TYPE_INFO_BOOL;
+                Array_add(&exp->outputs, &gt_bool);
+            }
+            else
+                com_error(op->loc, "Cannot compare values of type '%s' and '%s'.\n", Type_info_name(*gt_l), Type_info_name(*gt_r));
             break;
         case INTRINSIC_TYPE_MODULO:
             parse_expression(exp, operations_iter, identifiers);
             parse_expression(exp, operations_iter, identifiers);
             if (exp->outputs.length - prev_output_count != 2)
-                com_error(op->loc, "The 'greater than' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
+                com_error(op->loc, "The 'modulo' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
             enum TypeInfo *modulo_r = Array_pop(&exp->outputs);
             enum TypeInfo *modulo_l = Array_pop(&exp->outputs);
-            (void)modulo_r;
-            (void)modulo_l;
-            // TODO: type check plus_r, plus_l
-            Array_add(&exp->operations, op);
-            Array_add(&exp->outputs, modulo_r);
+            if (*modulo_r == TYPE_INFO_INT && *modulo_r == *modulo_l)
+            {
+                Array_add(&exp->operations, op);
+                Array_add(&exp->outputs, modulo_r);
+            }
+            else
+                com_error(op->loc, "Cannot 'modulo' combine values of type '%s' and '%s'.\n", Type_info_name(*modulo_l), Type_info_name(*modulo_r));
             break;
         case INTRINSIC_TYPE_EQUAL:
             parse_expression(exp, operations_iter, identifiers);
             parse_expression(exp, operations_iter, identifiers);
             if (exp->outputs.length - prev_output_count != 2)
-                com_error(op->loc, "The 'greater than' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
+                com_error(op->loc, "The 'equal' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
             enum TypeInfo *equal_r = Array_pop(&exp->outputs);
             enum TypeInfo *equal_l = Array_pop(&exp->outputs);
-            (void)equal_r;
-            (void)equal_l;
-            // TODO: type check plus_r, plus_l
-            Array_add(&exp->operations, op);
-            Array_add(&exp->outputs, equal_r);
+            if (*equal_r == TYPE_INFO_INT && *equal_r == *equal_l)
+            {
+                Array_add(&exp->operations, op);
+                enum Type_info equal_bool = TYPE_INFO_BOOL;
+                Array_add(&exp->outputs, &equal_bool);
+            }
+            else
+                com_error(op->loc, "Cannot compare values of type '%s' and '%s'.\n", Type_info_name(*equal_l), Type_info_name(*equal_r));
+            break;
+        case INTRINSIC_TYPE_OR:
+            parse_expression(exp, operations_iter, identifiers);
+            parse_expression(exp, operations_iter, identifiers);
+            if (exp->outputs.length - prev_output_count != 2)
+                com_error(op->loc, "The 'or' intrinsic takes 2 input but %d were provided.\n", exp->outputs.length);
+            enum TypeInfo *or_r = Array_pop(&exp->outputs);
+            enum TypeInfo *or_l = Array_pop(&exp->outputs);
+            if (*or_r == TYPE_INFO_BOOL && *or_r == *or_l)
+            {
+                Array_add(&exp->operations, op);
+                enum Type_info equal_bool = TYPE_INFO_BOOL;
+                Array_add(&exp->outputs, &equal_bool);
+            }
+            else
+                com_error(op->loc, "Cannot 'or' combine values of type '%s' and '%s'.\n", Type_info_name(*or_l), Type_info_name(*or_r));
             break;
         default:
             com_error(op->loc, "Intrinsic type '%d' is not implemented yet in 'parse_expression'.\n", op->intrinsic.type);

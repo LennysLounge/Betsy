@@ -127,6 +127,18 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
                 };
                 Array_add(outputs, &equal_result);
                 break;
+            case INTRINSIC_TYPE_OR:
+                if (outputs->length < 2)
+                    sim_error(op->loc, "Not enough values for the or intrinsic.\n");
+                r = Array_pop(outputs);
+                l = Array_pop(outputs);
+                // TODO: type check
+                struct Sim_value or_result = {
+                    .data = l->data || r->data,
+                    .type = r->type,
+                };
+                Array_add(outputs, &or_result);
+                break;
             default:
                 sim_error(op->loc, "Intrinsic of type '%d' not implemented yet in 'simulate_expression'", op->intrinsic.type);
                 break;

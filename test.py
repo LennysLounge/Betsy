@@ -52,15 +52,21 @@ def compileTest(root, file):
     # Run compiler
     proc = subprocess.Popen([betsyPath, "com", root + "/" + file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()
+
+    stdout = stdout + b"\r\nProgram output:\r\n"
+    stderr = stderr + b"\r\nProgram output:\r\n"
+
     # Compile program
     proc_cl = subprocess.Popen(["cl", "out.c"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     proc_cl.communicate()
-    # Run program
-    proc_p = subprocess.Popen(["out"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout_p, stderr_p = proc_p.communicate()
 
-    stdout = stdout + b"\r\nProgram output:\r\n" + stdout_p
-    stderr = stderr + b"\r\nProgram output:\r\n" + stderr_p
+    if os.path.exists("out.exe"):
+        # Run program
+        proc_p = subprocess.Popen(["out"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout_p, stderr_p = proc_p.communicate()
+
+        stdout = stdout + stdout_p
+        stderr = stderr + stderr_p
 
     resultDir = root + "/results_com/"
     if recordResults:

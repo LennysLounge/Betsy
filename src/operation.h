@@ -22,6 +22,7 @@ enum Intrinsic_type
     INTRINSIC_TYPE_GT,
     INTRINSIC_TYPE_MODULO,
     INTRINSIC_TYPE_EQUAL,
+    INTRINSIC_TYPE_OR,
     INTRINSIC_TYPE_COUNT
 };
 
@@ -83,6 +84,7 @@ const struct Operation OP_INTRINSIC_MINUS = {.type = OPERATION_TYPE_INTRINSIC, .
 const struct Operation OP_INTRINSIC_GT = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_GT, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 const struct Operation OP_INTRINSIC_MODULO = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_MODULO, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 const struct Operation OP_INTRINSIC_EQUAL = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_EQUAL, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
+const struct Operation OP_INTRINSIC_OR = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_OR, .intrinsic.nr_inputs = 1, .intrinsic.nr_outputs = 1};
 
 const struct Operation OP_VALUE_INT = {.type = OPERATION_TYPE_VALUE, .literal.value = 0, .literal.typeInfo = TYPE_INFO_INT};
 

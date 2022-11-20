@@ -137,6 +137,20 @@ void compile_expression(FILE *output, int indent, struct Expression exp, int *ma
                 fprintf_i(output, indent, "stack_%03d = stack_%03d == stack_%03d;\n",
                           type_info_stack.length - 1, type_info_stack.length - 1, type_info_stack.length);
                 break;
+            case INTRINSIC_TYPE_OR:
+                if (type_info_stack.length < 2)
+                {
+                    fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the or intrinsic\n",
+                            op->loc.filename, op->loc.line, op->loc.collumn);
+                    exit(1);
+                }
+                // TODO: type check
+                r = Array_pop(&type_info_stack);
+                l = Array_pop(&type_info_stack);
+                Array_add(&type_info_stack, l);
+                fprintf_i(output, indent, "stack_%03d = stack_%03d || stack_%03d;\n",
+                          type_info_stack.length - 1, type_info_stack.length - 1, type_info_stack.length);
+                break;
             default:
                 fprintf(stderr, "ERROR: Intrinsic of type '%d' is not yet implemented in 'compile_expression'.\n",
                         op->intrinsic.type);

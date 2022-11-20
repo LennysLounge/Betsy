@@ -4,7 +4,7 @@
 var sum 0
 var i 1
 while > 1000 i do
-    if + 
+    if or
         = 0 % i 3 
         = 0 % i 5 do
         set sum + sum i
