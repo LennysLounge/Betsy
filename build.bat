@@ -1,9 +1,13 @@
 @echo off
 
+set files=../src/betsy.c
+
 if NOT exist build mkdir build 
 pushd build
 
-cl /nologo /std:c11 /W4 ../src/betsy.c ^
+echo %files%
+
+cl /nologo /std:c11 /Zi /W4 %files% ^
     /link
 
 move betsy.exe ../betsy.exe > NUL
