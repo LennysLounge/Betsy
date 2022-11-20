@@ -4,5 +4,5 @@ print + 144 56 # this will print 200
 
 # A hash mark has to be sperated by a space. Otherwise
 # the '#' is part of the identifier
-var i# 23
+var i# int 23
 print i# # only this is a comment

@@ -2,9 +2,9 @@
 #       1, 2, 3, 5, 8, 13, 21, 34, 55, 89, ...
 # By considering the terms in the Fibonacci sequence whose values do not exceed four million, find the sum of the even-valued terms.
 
-var a 1
-var b 1
-var sum 0
+var a int 1
+var b int 1
+var sum int 0
 while > 4_000_000 a do
     if = 0 % a 2 do
         set sum + sum a

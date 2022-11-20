@@ -1,5 +1,5 @@
-var number 12
-var other_number 144
+var number int 12
+var other_number int 144
 
 set other_number 69
 set number other_number

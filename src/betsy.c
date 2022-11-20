@@ -203,14 +203,20 @@ struct Tuple
     int required_size;
 };
 
-struct Operation *get_identifier(struct Array *array, char *name)
+struct Identifier
+{
+    struct Operation op;
+    enum Type_info type_info;
+};
+
+struct Identifier *get_identifier(struct Array *array, char *name)
 {
     for (int i = 0; i < array->length; i++)
     {
-        struct Operation *op = Array_get(array, i);
-        if (strcmp(op->token, name) == 0)
+        struct Identifier *id = Array_get(array, i);
+        if (strcmp(id->op.token, name) == 0)
         {
-            return op;
+            return id;
         }
     }
     return NULL;
@@ -233,13 +239,11 @@ void parse_expression(struct Expression *exp, struct Iterator *operations_iter, 
         Array_add(&exp->outputs, &op->literal.typeInfo);
         break;
     case OPERATION_TYPE_IDENTIFIER:
-        struct Operation *id_op = get_identifier(identifiers, op->token);
-        if (id_op == NULL)
+        struct Identifier *id_id = get_identifier(identifiers, op->token);
+        if (id_id == NULL)
             com_error(op->loc, "Unkown identifier '%s'.\n", op->token);
         Array_add(&exp->operations, op);
-        // TODO: get type from identifier
-        enum Type_info type_int = TYPE_INFO_INT;
-        Array_add(&exp->outputs, &type_int);
+        Array_add(&exp->outputs, &id_id->type_info);
         break;
     case OPERATION_TYPE_INTRINSIC:
         int prev_output_count = exp->outputs.length;
@@ -401,20 +405,50 @@ void parse_statement(struct Statement *statement, struct Iterator *iter_ops, str
         case KEYWORD_TYPE_VAR:
             Iterator_next(iter_ops);
 
+            // Parse identifier name
             if (!Iterator_hasNext(iter_ops))
                 com_error(op->loc, "Unexpected end of file.\n");
+            struct Operation *var_id_op = Iterator_next(iter_ops);
+
+            // Check if the identifier is already declared
+            struct Identifier *prev_var_id = get_identifier(identifiers, var_id_op->token);
+            if (prev_var_id != NULL)
+                com_error(op->loc, "Variable '%s' was already defined here: %s:%d:%d.\n.",
+                          var_id_op->token, op->loc.filename, op->loc.line, op->loc.collumn);
+
+            // Parse type info
+            if (!Iterator_hasNext(iter_ops))
+                com_error(op->loc, "Unexpected end of file.\n");
+            struct Operation *var_type_op = Iterator_next(iter_ops);
+            enum Type_info var_type = Type_info_by_name(var_type_op->token);
+            if (var_type == -1)
+                com_error(var_type_op->loc, "'%s' is not a valid type declaration.\n", var_type_op->token);
+
+            // Add the identifier
+            struct Identifier var_id = {
+                .op = *var_id_op,
+                .type_info = var_type,
+            };
+            Array_add(identifiers, &var_id);
+
+            // Parse the expression
+            struct Expression var_exp;
+            Expression_init(&var_exp);
+            parse_expression(&var_exp, iter_ops, identifiers);
+
+            // Typecheck the expression
+            if (var_exp.outputs.length != 1)
+                com_error(var_id_op->loc, "Variable declaration must produce exactly one ouput.\n");
+
+            enum Type_info *var_output = Array_top(&var_exp.outputs);
+            if (*var_output != var_id.type_info)
+                com_error(var_id_op->loc, "Variable '%s' is of type '%s' but the assignment is of type '%s'.\n",
+                          var_id.op.token, Type_info_name(var_id.type_info), Type_info_name(*var_output));
 
             statement->type = STATEMENT_TYPE_VAR;
-            statement->var.identifier = *((struct Operation *)Iterator_next(iter_ops));
-            Expression_init(&statement->var.assignment);
-            parse_expression(&statement->var.assignment, iter_ops, identifiers);
-
-            struct Operation *var_op = get_identifier(identifiers, statement->var.identifier.token);
-            if (var_op != NULL)
-                com_error(op->loc, "Variable '%s' was already defined here: %s:%d:%d.\n.",
-                          statement->var.identifier.token, op->loc.filename, op->loc.line, op->loc.collumn);
-
-            Array_add(identifiers, &statement->var.identifier);
+            statement->var.identifier = *var_id_op;
+            statement->var.type_info = var_type;
+            statement->var.assignment = var_exp;
 
             break;
         case KEYWORD_TYPE_SET:
@@ -425,13 +459,24 @@ void parse_statement(struct Statement *statement, struct Iterator *iter_ops, str
 
             statement->type = STATEMENT_TYPE_SET;
             statement->set.identifier = *((struct Operation *)Iterator_next(iter_ops));
+
+            // Check if the identifier is declared
+            struct Identifier *set_id = get_identifier(identifiers, statement->set.identifier.token);
+            if (set_id == NULL)
+                com_error(op->loc, "Undefined variable '%s'.\n.", statement->set.identifier.token);
+
+            // Parse expression
             Expression_init(&statement->set.assignment);
             parse_expression(&statement->set.assignment, iter_ops, identifiers);
 
-            struct Operation *set_op = get_identifier(identifiers, statement->set.identifier.token);
-            if (set_op == NULL)
-                com_error(op->loc, "Undefined variable '%s'.\n.", statement->set.identifier.token);
+            // Typecheck expression
+            if (statement->set.assignment.outputs.length != 1)
+                com_error(statement->set.identifier.loc, "Variable assignment must produce exactly one ouput.\n");
 
+            enum Type_info *set_output = Array_top(&statement->set.assignment.outputs);
+            if (*set_output != set_id->type_info)
+                com_error(statement->set.identifier.loc, "Variable '%s' is of type '%s' but the assignment is of type '%s'.\n",
+                          set_id->op.token, Type_info_name(set_id->type_info), Type_info_name(*set_output));
             break;
         case KEYWORD_TYPE_DO:
             Iterator_next(iter_ops);
@@ -482,7 +527,7 @@ void parse_statement(struct Statement *statement, struct Iterator *iter_ops, str
 void parse_program(struct Array *program, struct Array *operations)
 {
     struct Array identifiers;
-    Array_init(&identifiers, sizeof(struct Operation));
+    Array_init(&identifiers, sizeof(struct Identifier));
 
     struct Iterator iter_ops = Iterator_create(operations);
     while (Iterator_hasNext(&iter_ops))

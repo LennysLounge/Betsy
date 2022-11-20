@@ -34,6 +34,7 @@ struct Statement
         {
             struct Operation identifier;
             struct Expression assignment;
+            enum Type_info type_info;
         } var;
         struct
         {
