@@ -5,7 +5,7 @@
 var a 1
 var b 1
 var sum 0
-while > 4000000 a do
+while > 4_000_000 a do
     if = 0 % a 2 do
         set sum + sum a
     end

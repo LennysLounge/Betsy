@@ -3,7 +3,7 @@
 
 var sum 0
 var i 1
-while > 10000000 i do
+while > 1000 i do
     if + 
         = 0 % i 3 
         = 0 % i 5 do
