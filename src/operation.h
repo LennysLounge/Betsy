@@ -2,6 +2,8 @@
 #define OPERATION_H
 
 #include <stdlib.h>
+#include <stdint.h>
+#include "typeInfo.h"
 
 enum Operation_type
 {
@@ -60,8 +62,9 @@ struct Operation
         } keyword;
         struct
         {
-            int value;
-        } value;
+            int64_t value;
+            enum Type_info typeInfo;
+        } literal;
         struct
         {
             char *word;
@@ -81,7 +84,7 @@ const struct Operation OP_INTRINSIC_GT = {.type = OPERATION_TYPE_INTRINSIC, .int
 const struct Operation OP_INTRINSIC_MODULO = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_MODULO, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 const struct Operation OP_INTRINSIC_EQUAL = {.type = OPERATION_TYPE_INTRINSIC, .intrinsic.type = INTRINSIC_TYPE_EQUAL, .intrinsic.nr_inputs = 2, .intrinsic.nr_outputs = 1};
 
-const struct Operation OP_VALUE_INT = {.type = OPERATION_TYPE_VALUE, .value = 0};
+const struct Operation OP_VALUE_INT = {.type = OPERATION_TYPE_VALUE, .literal.value = 0, .literal.typeInfo = TYPE_INFO_INT};
 
 const struct Operation OP_IDENTIFIER = {.type = OPERATION_TYPE_IDENTIFIER, .identifier.word = NULL};
 

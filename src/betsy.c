@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 
 #include "operation.h"
 #include "array.h"
@@ -30,8 +31,8 @@
 
 char *read_entire_file(char *filename)
 {
-    FILE *input = fopen(filename, "rb");
-    if (input == NULL)
+    FILE *input;
+    if (fopen_s(&input, filename, "rb"))
     {
         fprintf(stderr, "ERROR: File '%s' cannot be opened.\n", filename);
         exit(0);
@@ -93,17 +94,16 @@ bool find_next_word(char *file_text, struct FileIterator *iter)
     return true;
 }
 
-bool tryParseInteger(char *word, int *out)
+bool tryParseInteger(char *word, int32_t *out)
 {
-    int i = 0;
-    int sign = 1;
+    int32_t i = 0;
+    int32_t sign = 1;
     if (word[0] == '-')
     {
         sign = -1;
         i++;
     }
-    int value = 0;
-
+    int32_t value = 0;
     for (; word[i] != 0; i++)
     {
         if (word[i] == '_')
@@ -113,7 +113,11 @@ bool tryParseInteger(char *word, int *out)
         {
             return false;
         }
-        value = value * 10 + (word[i] - '0');
+        // Test overflow
+        int8_t unit = word[i] - '0';
+        if (value > INT32_MAX / 10 - unit)
+            return false; // TODO: Give error message?
+        value = value * 10 + unit;
     }
     *out = value * sign;
     return true;
@@ -133,7 +137,7 @@ void parse_file(struct Array *operations, char *filename)
             fprintf(stderr, "ERROR: Allocation error in %s:%d\n", __FILE__, __LINE__);
             exit(1);
         }
-        strncpy(token, file_text + iter.start, iter.length);
+        strncpy_s(token, iter.length + 1, file_text + iter.start, iter.length);
         token[iter.length] = 0;
 
         // Create location
@@ -144,7 +148,7 @@ void parse_file(struct Array *operations, char *filename)
 
         // Create operation
         struct Operation op;
-        int value;
+        int32_t value32;
         _Static_assert(INTRINSIC_TYPE_COUNT == 6, "Exhaustive handling of intrinsic types");
         _Static_assert(KEYWORD_TYPE_COUNT == 6, "Exhaustive handling of keyword types");
         // INTRINSICS
@@ -174,10 +178,10 @@ void parse_file(struct Array *operations, char *filename)
         else if (strcmp(token, "while") == 0)
             op = OP_KEYWORD_WHILE;
         // VALUES
-        else if (tryParseInteger(token, &value))
+        else if (tryParseInteger(token, &value32))
         {
             op = OP_VALUE_INT;
-            op.value.value = value;
+            op.literal.value = value32;
         }
         else
         {
@@ -430,17 +434,23 @@ void parse_program(struct Array *program, struct Array *operations)
     Array_free(&identifiers);
 }
 
-struct IdentifierElement
+struct Sim_value
 {
-    struct Operation *identifier;
-    size_t value;
+    uint64_t data;
+    enum Type_info type;
 };
 
-struct IdentifierElement *get_identifier_element(struct Array *identifiers, char *id)
+struct Sim_identifier
+{
+    struct Operation *identifier;
+    struct Sim_value value;
+};
+
+struct Sim_identifier *get_sim_identifier(struct Array *identifiers, char *id)
 {
     for (int i = 0; i < identifiers->length; i++)
     {
-        struct IdentifierElement *element = Array_get(identifiers, i);
+        struct Sim_identifier *element = Array_get(identifiers, i);
         if (strcmp(element->identifier->token, id) == 0)
         {
             return element;
@@ -456,7 +466,7 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
     for (int j = 0; j < exp.operations.length; j++)
     {
         struct Operation *op = Array_get(&exp.operations, j);
-        size_t r, l;
+        struct Sim_value *r, *l;
         //_Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
         switch (op->type)
         {
@@ -466,48 +476,76 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
             case INTRINSIC_TYPE_PRINT:
                 if (outputs->length < 1)
                     sim_error(op->loc, "Not enough values for the print intrinsic.\n");
-                r = *((size_t *)Array_pop(outputs));
-                printf("%zd\n", r);
+                struct Sim_value *print_value = Array_pop(outputs);
+                switch (print_value->type)
+                {
+                case TYPE_INFO_INT:
+                    printf("%d\n", (int32_t)print_value->data);
+                    break;
+                default:
+                    sim_error(op->loc, "Print intrinsic not applicable for type %d.\n", print_value->type);
+                    break;
+                }
                 break;
             case INTRINSIC_TYPE_PLUS:
                 if (outputs->length < 2)
                     sim_error(op->loc, "Not enough values for the plus intrinsic.\n");
-                r = *((size_t *)Array_pop(outputs));
-                l = *((size_t *)Array_pop(outputs));
-                l = r + l;
-                Array_add(outputs, &l);
+                r = Array_pop(outputs);
+                l = Array_pop(outputs);
+                // TODO: type check
+                struct Sim_value plus_result = {
+                    .data = l->data + r->data,
+                    .type = r->type,
+                };
+                Array_add(outputs, &plus_result);
                 break;
             case INTRINSIC_TYPE_MINUS:
                 if (outputs->length < 2)
                     sim_error(op->loc, "Not enough values for the minus intrinsic.\n");
-                r = *((size_t *)Array_pop(outputs));
-                l = *((size_t *)Array_pop(outputs));
-                l = l - r;
-                Array_add(outputs, &l);
+                r = Array_pop(outputs);
+                l = Array_pop(outputs);
+                // TODO: type check
+                struct Sim_value minus_result = {
+                    .data = l->data - r->data,
+                    .type = r->type,
+                };
+                Array_add(outputs, &minus_result);
                 break;
             case INTRINSIC_TYPE_GT:
                 if (outputs->length < 2)
                     sim_error(op->loc, "Not enough values for the greater than intrinsic.\n");
-                r = *((size_t *)Array_pop(outputs));
-                l = *((size_t *)Array_pop(outputs));
-                l = l > r;
-                Array_add(outputs, &l);
+                r = Array_pop(outputs);
+                l = Array_pop(outputs);
+                // TODO: type check
+                struct Sim_value gt_result = {
+                    .data = l->data > r->data,
+                    .type = r->type,
+                };
+                Array_add(outputs, &gt_result);
                 break;
             case INTRINSIC_TYPE_MODULO:
                 if (outputs->length < 2)
                     sim_error(op->loc, "Not enough values for the modulo intrinsic.\n");
-                r = *((size_t *)Array_pop(outputs));
-                l = *((size_t *)Array_pop(outputs));
-                l = l % r;
-                Array_add(outputs, &l);
+                r = Array_pop(outputs);
+                l = Array_pop(outputs);
+                // TODO: type check
+                struct Sim_value modulo_result = {
+                    .data = l->data % r->data,
+                    .type = r->type,
+                };
+                Array_add(outputs, &modulo_result);
                 break;
             case INTRINSIC_TYPE_EQUAL:
                 if (outputs->length < 2)
                     sim_error(op->loc, "Not enough values for the equal intrinsic.\n");
-                r = *((size_t *)Array_pop(outputs));
-                l = *((size_t *)Array_pop(outputs));
-                l = l == r;
-                Array_add(outputs, &l);
+                r = Array_pop(outputs);
+                l = Array_pop(outputs);
+                // TODO: type check
+                struct Sim_value equal_result = {
+                    .data = l->data == r->data,
+                    .type = r->type,
+                };
+                Array_add(outputs, &equal_result);
                 break;
             default:
                 sim_error(op->loc, "Intrinsic of type '%d' not implemented yet in 'simulate_expression'", op->intrinsic.type);
@@ -515,10 +553,14 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
             }
             break;
         case OPERATION_TYPE_VALUE:
-            Array_add(outputs, &op->value.value);
+            struct Sim_value value_result = {
+                .data = op->literal.value,
+                .type = op->literal.typeInfo,
+            };
+            Array_add(outputs, &value_result);
             break;
         case OPERATION_TYPE_IDENTIFIER:
-            struct IdentifierElement *id_elem = get_identifier_element(identifiers, op->token);
+            struct Sim_identifier *id_elem = get_sim_identifier(identifiers, op->token);
             if (id_elem == NULL)
                 sim_error(op->loc, "Unknwon identifier '%s'.\n", op->token);
             Array_add(outputs, &id_elem->value);
@@ -533,14 +575,13 @@ void simulate_expression(struct Expression exp, struct Array *outputs, struct Ar
 void simulate_statement(struct Statement *statement, struct Array *identifiers)
 {
     struct Array exp_output;
-    Array_init(&exp_output, sizeof(size_t));
+    Array_init(&exp_output, sizeof(struct Sim_value));
 
     switch (statement->type)
     {
     case STATEMENT_TYPE_EXP:
         simulate_expression(statement->expression, &exp_output, identifiers);
         break;
-
     case STATEMENT_TYPE_IF:
         simulate_expression(statement->iff.condition, &exp_output, identifiers);
         if (exp_output.length != 1)
@@ -548,8 +589,9 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
             struct Operation *op = Array_top(&statement->iff.condition.operations);
             sim_error(op->loc, "If condition must produce exactly one output.\n");
         }
-        size_t result = *((size_t *)Array_get(&exp_output, 0));
-        if (result != 0)
+        struct Sim_value *if_result = Array_get(&exp_output, 0);
+        //  TODO: do we have to cast to the correct type to check unequal zero? Maybe for floats or doubles?
+        if (if_result->data != 0)
         {
             simulate_statement(statement->iff.action, identifiers);
         }
@@ -563,14 +605,15 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
                 struct Operation *op = Array_top(&statement->whilee.condition.operations);
                 sim_error(op->loc, "While condition must produce exactly one output.\n");
             }
-            size_t result = *((size_t *)Array_get(&exp_output, 0));
-            if (result == 0)
+            struct Sim_value *while_result = Array_get(&exp_output, 0);
+            // TODO: do we have to cast to the correct type to check unequal zero?
+            if (while_result->data == 0)
                 break;
             simulate_statement(statement->whilee.action, identifiers);
         }
         break;
     case STATEMENT_TYPE_VAR:
-        struct IdentifierElement *prev_id = get_identifier_element(identifiers, statement->var.identifier.token);
+        struct Sim_identifier *prev_id = get_sim_identifier(identifiers, statement->var.identifier.token);
         if (prev_id != NULL)
             sim_error(statement->var.identifier.loc, "Variable '%s' was already defined here: %s:%d:%d.\n.",
                       statement->var.identifier.token,
@@ -579,7 +622,7 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
                       prev_id->identifier->loc.collumn);
 
         // add identifier
-        struct IdentifierElement id;
+        struct Sim_identifier id;
         id.identifier = &statement->var.identifier;
         simulate_expression(statement->var.assignment, &exp_output, identifiers);
         if (exp_output.length != 1)
@@ -587,11 +630,12 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
             struct Operation *op = Array_top(&statement->var.assignment.operations);
             sim_error(op->loc, "Variable declaration must produce exactly one output.\n");
         }
-        id.value = *((size_t *)Array_get(&exp_output, 0));
+        struct Sim_value *var_result = Array_get(&exp_output, 0);
+        id.value = *var_result;
         Array_add(identifiers, &id);
         break;
     case STATEMENT_TYPE_SET:
-        struct IdentifierElement *set_prev_id = get_identifier_element(identifiers, statement->set.identifier.token);
+        struct Sim_identifier *set_prev_id = get_sim_identifier(identifiers, statement->set.identifier.token);
         if (set_prev_id == NULL)
             sim_error(statement->var.identifier.loc, "Undefined variable '%s'.\n", statement->var.identifier.token);
         // evaluate expression
@@ -601,7 +645,8 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
             struct Operation *op = Array_top(&statement->var.assignment.operations);
             sim_error(op->loc, "Variable declaration must produce exactly one output.\n");
         }
-        set_prev_id->value = *((size_t *)Array_get(&exp_output, 0));
+        struct Sim_value *set_result = Array_get(&exp_output, 0);
+        set_prev_id->value = *set_result;
         break;
     case STATEMENT_TYPE_BLOCK:
         int identifiers_stack_length = identifiers->length;
@@ -622,87 +667,138 @@ void simulate_statement(struct Statement *statement, struct Array *identifiers)
 void simulate_program(struct Array *program)
 {
     struct Array identifiers;
-    Array_init(&identifiers, sizeof(struct IdentifierElement));
+    Array_init(&identifiers, sizeof(struct Sim_identifier));
 
     for (int i = 0; i < program->length; i++)
     {
         struct Statement *statement = Array_get(program, i);
         simulate_statement(statement, &identifiers);
     }
+
+    Array_free(&identifiers);
 }
 
-void compile_expression(FILE *output, int indent, struct Expression exp, int *max_stack_size)
+struct Com_identifier
 {
-    int stack_size = 0;
+    struct Operation *identifier;
+    enum Type_info type;
+};
+
+struct Com_identifier *get_com_identifier(struct Array *identifiers, char *id)
+{
+    for (int i = 0; i < identifiers->length; i++)
+    {
+        struct Com_identifier *element = Array_get(identifiers, i);
+        if (strcmp(element->identifier->token, id) == 0)
+        {
+            return element;
+        }
+    }
+    return NULL;
+}
+
+void compile_expression(FILE *output, int indent, struct Expression exp, int *max_stack_size, struct Array *identifiers)
+{
+    struct Array type_info_stack;
+    Array_init(&type_info_stack, sizeof(enum Type_info));
 
     for (int j = 0; j < exp.operations.length; j++)
     {
         struct Operation *op = Array_get(&exp.operations, j);
         //_Static_assert(OPERATION_TYPE_COUNT == 3, "Exhaustive handling of Operations");
+        enum TypeInfo *r, *l;
         switch (op->type)
         {
         case OPERATION_TYPE_INTRINSIC:
             switch (op->intrinsic.type)
             {
             case INTRINSIC_TYPE_PRINT:
-                if (stack_size < 1)
+                if (type_info_stack.length < 1)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the print intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
                     exit(1);
                 }
-                stack_size--;
-                fprintf_i(output, indent, "printf(\"%%zd\\n\", stack_%03d);\n", stack_size);
+                enum Type_info *print_type = Array_pop(&type_info_stack);
+                switch (*print_type)
+                {
+                case TYPE_INFO_INT:
+                    fprintf_i(output, indent, "printf(\"%%d\\n\", (int32_t)stack_%03d);\n", type_info_stack.length);
+                    break;
+                default:
+                    com_error(op->loc, "Print intrinsic not applicable for type %d.\n", *print_type);
+                    break;
+                }
                 break;
             case INTRINSIC_TYPE_PLUS:
-                if (stack_size < 2)
+                if (type_info_stack.length < 2)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the plus intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
                     exit(1);
                 }
-                stack_size--;
-                fprintf_i(output, indent, "stack_%03d = stack_%03d + stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                // TODO: type check
+                r = Array_pop(&type_info_stack);
+                l = Array_pop(&type_info_stack);
+                Array_add(&type_info_stack, l);
+                fprintf_i(output, indent, "stack_%03d = stack_%03d + stack_%03d;\n",
+                          type_info_stack.length - 1, type_info_stack.length - 1, type_info_stack.length);
                 break;
             case INTRINSIC_TYPE_MINUS:
-                if (stack_size < 2)
+                if (type_info_stack.length < 2)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the minus intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
                     exit(1);
                 }
-                stack_size--;
-                fprintf_i(output, indent, "stack_%03d = stack_%03d - stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                // TODO: type check
+                r = Array_pop(&type_info_stack);
+                l = Array_pop(&type_info_stack);
+                Array_add(&type_info_stack, l);
+                fprintf_i(output, indent, "stack_%03d = stack_%03d - stack_%03d;\n",
+                          type_info_stack.length - 1, type_info_stack.length - 1, type_info_stack.length);
                 break;
             case INTRINSIC_TYPE_GT:
-                if (stack_size < 2)
+                if (type_info_stack.length < 2)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the greater than intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
                     exit(1);
                 }
-                stack_size--;
-                fprintf_i(output, indent, "stack_%03d = stack_%03d > stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                // TODO: type check
+                r = Array_pop(&type_info_stack);
+                l = Array_pop(&type_info_stack);
+                Array_add(&type_info_stack, l);
+                fprintf_i(output, indent, "stack_%03d = stack_%03d > stack_%03d;\n",
+                          type_info_stack.length - 1, type_info_stack.length - 1, type_info_stack.length);
                 break;
             case INTRINSIC_TYPE_MODULO:
-                if (stack_size < 2)
+                if (type_info_stack.length < 2)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the modulo intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
                     exit(1);
                 }
-                stack_size--;
-                fprintf_i(output, indent, "stack_%03d = stack_%03d %% stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                // TODO: type check
+                r = Array_pop(&type_info_stack);
+                l = Array_pop(&type_info_stack);
+                Array_add(&type_info_stack, l);
+                fprintf_i(output, indent, "stack_%03d = stack_%03d %% stack_%03d;\n",
+                          type_info_stack.length - 1, type_info_stack.length - 1, type_info_stack.length);
                 break;
             case INTRINSIC_TYPE_EQUAL:
-                if (stack_size < 2)
+                if (type_info_stack.length < 2)
                 {
                     fprintf(stderr, "%s:%d:%d ERROR: Not enough values for the equal intrinsic\n",
                             op->loc.filename, op->loc.line, op->loc.collumn);
                     exit(1);
                 }
-                stack_size--;
-                fprintf_i(output, indent, "stack_%03d = stack_%03d == stack_%03d;\n", stack_size - 1, stack_size - 1, stack_size);
+                // TODO: type check
+                r = Array_pop(&type_info_stack);
+                l = Array_pop(&type_info_stack);
+                Array_add(&type_info_stack, l);
+                fprintf_i(output, indent, "stack_%03d = stack_%03d == stack_%03d;\n",
+                          type_info_stack.length - 1, type_info_stack.length - 1, type_info_stack.length);
                 break;
             default:
                 fprintf(stderr, "ERROR: Intrinsic of type '%d' is not yet implemented in 'compile_expression'.\n",
@@ -713,66 +809,96 @@ void compile_expression(FILE *output, int indent, struct Expression exp, int *ma
             break;
         case OPERATION_TYPE_VALUE:
             fprintf_i(output, indent, "%sstack_%03d = %d;\n",
-                      (stack_size == *max_stack_size) ? "size_t " : "",
-                      stack_size, op->value.value);
-            stack_size++;
+                      (type_info_stack.length == *max_stack_size) ? "uint64_t " : "",
+                      type_info_stack.length, (int32_t)op->literal.value);
+            Array_add(&type_info_stack, &op->literal.typeInfo);
             break;
         case OPERATION_TYPE_IDENTIFIER:
             fprintf_i(output, indent, "%sstack_%03d = %s;\n",
-                      (stack_size == *max_stack_size) ? "size_t " : "",
-                      stack_size, op->token);
-            stack_size++;
+                      (type_info_stack.length == *max_stack_size) ? "uint64_t " : "",
+                      type_info_stack.length, op->token);
+            struct Com_identifier *id_id = get_com_identifier(identifiers, op->token);
+            if (id_id == NULL)
+                com_error(op->loc, "Unknown identifier '%s'.\n", op->token);
+            Array_add(&type_info_stack, &id_id->type);
             break;
         default:
             fprintf(stderr, "ERROR: Operation type '%d' is not yet implemented in 'compile_expression'.\n",
                     op->type);
             exit(1);
         }
-        if (stack_size > *max_stack_size)
-            *max_stack_size = stack_size;
+        if (type_info_stack.length > *max_stack_size)
+            *max_stack_size = type_info_stack.length;
     }
+    Array_free(&type_info_stack);
 }
 
-void compile_statement(FILE *output, int indent, struct Statement *statement, int *max_stack_size)
+void compile_statement(FILE *output, int indent, struct Statement *statement, int *max_stack_size, struct Array *identifiers)
 {
     switch (statement->type)
     {
     case STATEMENT_TYPE_EXP:
         struct Expression exp = statement->expression;
-        compile_expression(output, indent, exp, max_stack_size);
+        compile_expression(output, indent, exp, max_stack_size, identifiers);
         break;
     case STATEMENT_TYPE_IF:
-        compile_expression(output, indent, statement->iff.condition, max_stack_size);
+        compile_expression(output, indent, statement->iff.condition, max_stack_size, identifiers);
         fprintf_i(output, indent, "if (stack_000 != 0)\n");
-        compile_statement(output, indent, statement->iff.action, max_stack_size);
+        compile_statement(output, indent, statement->iff.action, max_stack_size, identifiers);
         break;
     case STATEMENT_TYPE_WHILE:
         fprintf_i(output, indent, "while (1)\n");
         fprintf_i(output, indent, "{\n");
-        compile_expression(output, indent + 1, statement->whilee.condition, max_stack_size);
+        compile_expression(output, indent + 1, statement->whilee.condition, max_stack_size, identifiers);
         fprintf_i(output, (indent + 1), "if(stack_000 == 0)\n");
         fprintf_i(output, (indent + 2), "break;\n");
-        compile_statement(output, indent + 1, statement->whilee.action, max_stack_size);
+        compile_statement(output, indent + 1, statement->whilee.action, max_stack_size, identifiers);
         fprintf_i(output, indent, "}\n");
         break;
     case STATEMENT_TYPE_VAR:
-        compile_expression(output, indent, statement->var.assignment, max_stack_size);
-        fprintf_i(output, indent, "size_t %s = stack_000;\n", statement->var.identifier.token);
+        compile_expression(output, indent, statement->var.assignment, max_stack_size, identifiers);
+        struct Com_identifier var_id;
+        var_id.identifier = &statement->var.identifier;
+        // TODO: get type from variable declaration
+        var_id.type = TYPE_INFO_INT;
+        Array_add(identifiers, &var_id);
+        switch (var_id.type)
+        {
+        case TYPE_INFO_INT:
+            fprintf_i(output, indent, "int32_t %s = stack_000;\n", statement->var.identifier.token);
+            break;
+        default:
+            fprintf(stderr, "Type %d not implemented yet in 'compile_statement' 'STATEMENT_TYPE_VAR'.\n", var_id.type);
+            exit(1);
+        }
         break;
     case STATEMENT_TYPE_SET:
-        compile_expression(output, indent, statement->set.assignment, max_stack_size);
-        fprintf_i(output, indent, "%s = stack_000;\n", statement->set.identifier.token);
+        compile_expression(output, indent, statement->set.assignment, max_stack_size, identifiers);
+        struct Com_identifier *set_id = get_com_identifier(identifiers, statement->set.identifier.token);
+        if (set_id == NULL)
+            com_error(statement->set.identifier.loc, "Unknown identifier '%s'.\n", statement->set.identifier.token);
+        switch (set_id->type)
+        {
+        case TYPE_INFO_INT:
+            fprintf_i(output, indent, "%s = (int32_t)stack_000;\n", statement->set.identifier.token);
+            break;
+        default:
+            fprintf(stderr, "Type %d not implemented yet in 'compile_statement' 'STATEMENT_TYPE_VAR'.\n", set_id->type);
+            exit(1);
+        }
         break;
     case STATEMENT_TYPE_BLOCK:
         fprintf_i(output, indent, "{\n");
         int prev_stack_size = *max_stack_size;
+        int prev_identifier_length = identifiers->length;
         for (int i = 0; i < statement->block.statements.length; i++)
         {
             struct Statement *block_statement = Array_get(&statement->block.statements, i);
-            compile_statement(output, indent + 1, block_statement, max_stack_size);
+            compile_statement(output, indent + 1, block_statement, max_stack_size, identifiers);
         }
         fprintf_i(output, indent, "}\n");
         *max_stack_size = prev_stack_size;
+        identifiers->length = prev_identifier_length;
         break;
     default:
         fprintf(stderr, "ERROR: Statement type '%d' not implemented yet in 'compile_program'\n", statement->type);
@@ -782,25 +908,33 @@ void compile_statement(FILE *output, int indent, struct Statement *statement, in
 
 void compile_program(struct Array *program)
 {
-    FILE *output = fopen("out.c", "w");
-    if (output == NULL)
+    FILE *output;
+    if (fopen_s(&output, "out.c", "w"))
     {
         fprintf(stderr, "ERROR: cannot open 'out.c' for writing\n");
         exit(1);
     }
 
+    struct Array identifiers;
+    Array_init(&identifiers, sizeof(struct Com_identifier));
+
     fprintf(output, "#include <stdio.h>\n");
+    fprintf(output, "#include <stdint.h>\n");
+    fprintf(output, "#include <inttypes.h>\n");
+    fprintf(output, "\n");
     fprintf(output, "int main(int argc, char *argv[])\n");
     fprintf(output, "{\n");
     int maximum_stack_size = 0;
     for (int i = 0; i < program->length; i++)
     {
         struct Statement *statement = Array_get(program, i);
-        compile_statement(output, 1, statement, &maximum_stack_size);
+        compile_statement(output, 1, statement, &maximum_stack_size, &identifiers);
     }
     fprintf(output, "    return 0;\n");
     fprintf(output, "}\n");
     fclose(output);
+
+    Array_free(&identifiers);
     return;
 }
 
